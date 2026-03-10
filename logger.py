@@ -1,7 +1,8 @@
-# logger.py — TapTap Analytics Chatbot v3
+# logger.py — TapTap POD Analytics Chatbot
 
 import logging
 import sys
+
 
 def get_logger(name: str = "taptap") -> logging.Logger:
     logger = logging.getLogger(name)
@@ -22,5 +23,5 @@ def get_logger(name: str = "taptap") -> logging.Logger:
     return logger
 
 
-# Module-level default logger
+# Shared logger instance — imported by all other files
 logger = get_logger("taptap")

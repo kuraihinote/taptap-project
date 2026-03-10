@@ -3,17 +3,18 @@
 # Backend
 fastapi>=0.115.0
 uvicorn[standard]>=0.30.6
-asyncpg>=0.29.0
+sqlalchemy[asyncio]==2.0.36
+asyncpg==0.30.0
 python-dotenv>=1.0.1
-pydantic>=2.7.4
+pydantic==2.9.2
 
 # LangGraph + LangChain
-langgraph>=0.2.14
-langchain-core>=0.2.38
-langchain-openai>=0.1.23
-openai>=1.45.0
+langchain==0.3.7
+langgraph==0.2.45
+langchain-openai==0.2.8
+openai==1.54.3
 
 # Frontend
-streamlit>=1.38.0
+streamlit==1.40.0
 requests>=2.32.3
-pandas>=2.2.2
+pandas==2.2.3

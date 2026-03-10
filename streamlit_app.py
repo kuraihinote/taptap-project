@@ -1,69 +1,66 @@
-# streamlit_app.py — TapTap Analytics Chatbot v3 Frontend
+# streamlit_app.py — TapTap POD Analytics Chatbot Frontend
 
 import os
 import requests
 import pandas as pd
 import streamlit as st
 
-# ── Config ────────────────────────────────────────────────────────────────────
-
 API_BASE = os.getenv("TAPTAP_API_URL", "http://localhost:8000")
 
 st.set_page_config(
-    page_title="TapTap Analytics",
-    page_icon="🎓",
+    page_title="TapTap POD Analytics",
+    page_icon="🧩",
     layout="wide",
 )
 
-# ── Smart chart helper ────────────────────────────────────────────────────────
-# FIX: moved to top of file — Streamlit reruns top-to-bottom so the function
-#      must be defined before the block that calls it.
+
+# ── Chart helper ──────────────────────────────────────────────────────────────
 
 def _render_chart(df: pd.DataFrame, intent: str) -> None:
-    """Render an appropriate chart based on intent and data shape."""
     try:
-        if intent == "band_distribution" and "employabilityBand" in df.columns:
-            st.bar_chart(df.set_index("employabilityBand")["count"])
+        if intent == "pod_difficulty_breakdown" and "difficulty" in df.columns:
+            st.bar_chart(df.set_index("difficulty")["students_attempted"])
 
-        elif intent == "score_distribution" and "bucket_start" in df.columns:
-            df = df.copy()
-            df["range"] = df["bucket_start"].astype(str) + "–" + df["bucket_end"].astype(str)
-            st.bar_chart(df.set_index("range")["count"])
+        elif intent == "pod_language_breakdown" and "language" in df.columns:
+            st.bar_chart(df.set_index("language")["students"])
 
-        elif intent in ("top_students", "bottom_students") and "employabilityScore" in df.columns:
-            label_col = "name" if "name" in df.columns else df.columns[0]
-            st.bar_chart(df.set_index(label_col)["employabilityScore"])
+        elif intent in ("pod_top_passers", "pod_top_scorers", "pod_top_coins") and "name" in df.columns:
+            score_col = (
+                "questions_passed" if "questions_passed" in df.columns
+                else "total_score" if "total_score" in df.columns
+                else "total_coins" if "total_coins" in df.columns
+                else None
+            )
+            if score_col:
+                st.bar_chart(df.set_index("name")[score_col])
 
-        elif intent == "department_summary" and "avg_score" in df.columns:
-            st.bar_chart(df.set_index("department")["avg_score"])
+        elif intent in ("pod_longest_streak", "pod_active_streaks") and "streak_count" in df.columns:
+            st.bar_chart(df.set_index("name")["streak_count"])
 
-        elif intent == "hackathon_performance" and "score" in df.columns:
-            label_col = "name" if "name" in df.columns else df.columns[0]
-            st.bar_chart(df.set_index(label_col)["score"])
+        elif intent == "pod_pass_rate" and "pass_rate_percent" in df.columns:
+            st.bar_chart(df.set_index("college")["pass_rate_percent"])
 
     except Exception:
-        pass  # Chart rendering is best-effort
+        pass  # Charts are best-effort
 
 
 # ── Session state ─────────────────────────────────────────────────────────────
 
 if "messages" not in st.session_state:
-    st.session_state.messages = []   # [{role, content, data, intent}]
+    st.session_state.messages = []
 
 if "college_name" not in st.session_state:
     st.session_state.college_name = ""
 
+
 # ── Sidebar ───────────────────────────────────────────────────────────────────
 
 with st.sidebar:
-    # FIX: use_container_width replaces deprecated use_column_width
-    st.image("https://via.placeholder.com/200x60?text=TapTap", use_container_width=True)
     st.markdown("## ⚙️ Settings")
-
     college_input = st.text_input(
         "Your College Name",
         value=st.session_state.college_name,
-        placeholder="e.g. Sri Venkateswara College of Engineering",
+        placeholder="e.g. Mahindra University",
         help="Automatically scopes every query to your college.",
     )
     st.session_state.college_name = college_input.strip()
@@ -71,14 +68,27 @@ with st.sidebar:
     st.divider()
     st.markdown("### 💡 Example Questions")
     examples = [
-        "Show me the top 10 students by employability score",
-        "What is the band distribution in my college?",
-        "Which department has the highest average score?",
-        "Show bottom 5 students in CSE department",
-        "How did students perform in the last hackathon?",
-        "Give me a pod pass/fail summary",
-        "What is the score distribution across my college?",
-        "Show profile for student REG001",
+        "Who solved today's POD?",
+        "How many students attempted the POD today?",
+        "What is today's POD question?",
+        "Who solved the POD fastest today?",
+        "Which students haven't attempted the POD yet?",
+        "Give me a pass/fail summary",
+        "What is our overall pass rate?",
+        "Show me the top 10 passers",
+        "Which students have never passed a POD?",
+        "Who passed this week?",
+        "Show difficulty breakdown",
+        "Which languages are students using?",
+        "Who solved hard problems?",
+        "Who has the longest streak?",
+        "Show active streaks",
+        "Who lost their streak recently?",
+        "Who has the most coins?",
+        "Total points earned today",
+        "Show top scorers",
+        "Who earned badges?",
+        "Who earned badges this week?",
     ]
     for ex in examples:
         if st.button(ex, use_container_width=True):
@@ -90,20 +100,18 @@ with st.sidebar:
         st.rerun()
 
     st.markdown("---")
-    st.caption("TapTap Analytics v3 · Powered by LangGraph + FastAPI")
+    st.caption("TapTap POD Analytics · FastAPI + LangGraph + SQLAlchemy")
 
 
 # ── Header ────────────────────────────────────────────────────────────────────
 
-st.title("🎓 TapTap Analytics Chatbot")
-st.markdown(
-    "Ask any question about student employability, hackathon performance, or pod submissions."
-)
+st.title("🧩 TapTap POD Analytics")
+st.markdown("Ask any question about student Problem of the Day activity.")
 
 if st.session_state.college_name:
     st.info(f"📍 College context: **{st.session_state.college_name}**", icon="🏫")
 else:
-    st.warning("Set your college name in the sidebar to get scoped results.", icon="⚠️")
+    st.warning("Set your college name in the sidebar to scope results to your college.", icon="⚠️")
 
 st.divider()
 
@@ -121,7 +129,7 @@ for msg in st.session_state.messages:
                 st.download_button(
                     "⬇️ Download CSV",
                     data=csv,
-                    file_name="taptap_result.csv",
+                    file_name="pod_result.csv",
                     mime="text/csv",
                     key=f"dl_{id(msg)}",
                 )
@@ -131,10 +139,9 @@ for msg in st.session_state.messages:
 
 # ── Chat input ────────────────────────────────────────────────────────────────
 
-prefill = st.session_state.pop("_prefill", None)
-user_input = st.chat_input("Ask about student performance…", key="chat_input")
-
-query = prefill or user_input
+prefill    = st.session_state.pop("_prefill", None)
+user_input = st.chat_input("Ask about POD activity…")
+query      = prefill or user_input
 
 if query:
     st.session_state.messages.append({"role": "user", "content": query})
@@ -145,7 +152,7 @@ if query:
         with st.spinner("Analysing…"):
             try:
                 payload = {
-                    "message": query,
+                    "message":      query,
                     "college_name": st.session_state.college_name or None,
                 }
                 resp = requests.post(
@@ -172,7 +179,7 @@ if query:
                         st.download_button(
                             "⬇️ Download CSV",
                             data=csv,
-                            file_name="taptap_result.csv",
+                            file_name="pod_result.csv",
                             mime="text/csv",
                         )
 
@@ -183,18 +190,18 @@ if query:
                     st.caption(f"Intent: `{intent}`")
 
                 st.session_state.messages.append({
-                    "role": "assistant",
+                    "role":    "assistant",
                     "content": answer,
-                    "data": data,
-                    "intent": intent,
+                    "data":    data,
+                    "intent":  intent,
                 })
 
             except requests.exceptions.ConnectionError:
-                msg = "❌ Cannot connect to the backend. Is the FastAPI server running?"
+                msg = "❌ Cannot connect to the backend. Is uvicorn running on port 8000?"
                 st.error(msg)
                 st.session_state.messages.append({"role": "assistant", "content": msg})
             except requests.exceptions.Timeout:
-                msg = "⏳ The request timed out. Please try again."
+                msg = "⏳ Request timed out. Please try again."
                 st.error(msg)
                 st.session_state.messages.append({"role": "assistant", "content": msg})
             except Exception as exc:

@@ -1,45 +1,68 @@
-# constants.py — TapTap Analytics Chatbot v3
+# constants.py — TapTap POD Analytics Chatbot
 
-# Employability band labels
-EMPLOYABILITY_BANDS = ["High", "Medium", "Low", "Very Low"]
+# ── LLM Config ────────────────────────────────────────────────────────────────
+LLM_TEMPERATURE = 0.0
+LLM_MAX_TOKENS  = 512
 
-# Role values in DB
-STUDENT_ROLE = "Student"
+# ── POD Intent Labels ─────────────────────────────────────────────────────────
 
-# Pod submission statuses
-POD_STATUS_PASS = "pass"
-POD_STATUS_FAIL = "fail"
+# Daily activity
+INTENT_POD_WHO_SOLVED_TODAY       = "pod_who_solved_today"
+INTENT_POD_ATTEMPT_COUNT_TODAY    = "pod_attempt_count_today"
+INTENT_POD_QUESTION_TODAY         = "pod_question_today"
+INTENT_POD_FASTEST_SOLVER         = "pod_fastest_solver"
+INTENT_POD_NOT_ATTEMPTED_TODAY    = "pod_not_attempted_today"
 
-# Default pagination
-DEFAULT_LIMIT = 50
-MAX_LIMIT = 500
+# Pass / fail performance
+INTENT_POD_PASS_FAIL_SUMMARY      = "pod_pass_fail_summary"
+INTENT_POD_PASS_RATE              = "pod_pass_rate"
+INTENT_POD_TOP_PASSERS            = "pod_top_passers"
+INTENT_POD_NEVER_PASSED           = "pod_never_passed"
+INTENT_POD_WEEKLY_PASSERS         = "pod_weekly_passers"
 
-# Intent labels (used by LLM classifier)
-INTENT_TOP_STUDENTS          = "top_students"
-INTENT_BOTTOM_STUDENTS       = "bottom_students"
-INTENT_BAND_DISTRIBUTION     = "band_distribution"
-INTENT_COLLEGE_SUMMARY       = "college_summary"
-INTENT_DEPARTMENT_SUMMARY    = "department_summary"
-INTENT_HACKATHON_PERFORMANCE = "hackathon_performance"
-INTENT_POD_PERFORMANCE       = "pod_performance"
-INTENT_STUDENT_PROFILE       = "student_profile"
-INTENT_SCORE_DISTRIBUTION    = "score_distribution"
-INTENT_UNKNOWN               = "unknown"
+# Difficulty & language
+INTENT_POD_DIFFICULTY_BREAKDOWN   = "pod_difficulty_breakdown"
+INTENT_POD_LANGUAGE_BREAKDOWN     = "pod_language_breakdown"
+INTENT_POD_HARD_SOLVERS           = "pod_hard_solvers"
+
+# Streaks & consistency
+INTENT_POD_LONGEST_STREAK         = "pod_longest_streak"
+INTENT_POD_ACTIVE_STREAKS         = "pod_active_streaks"
+INTENT_POD_LOST_STREAK            = "pod_lost_streak"
+
+# Points & coins
+INTENT_POD_TOP_COINS              = "pod_top_coins"
+INTENT_POD_TOTAL_POINTS_TODAY     = "pod_total_points_today"
+INTENT_POD_TOP_SCORERS            = "pod_top_scorers"
+
+# Badges
+INTENT_POD_BADGE_EARNERS          = "pod_badge_earners"
+INTENT_POD_WEEKLY_BADGE_EARNERS   = "pod_weekly_badge_earners"
+
+# Unknown
+INTENT_UNKNOWN                    = "unknown"
 
 ALL_INTENTS = [
-    INTENT_TOP_STUDENTS,
-    INTENT_BOTTOM_STUDENTS,
-    INTENT_BAND_DISTRIBUTION,
-    INTENT_COLLEGE_SUMMARY,
-    INTENT_DEPARTMENT_SUMMARY,
-    INTENT_HACKATHON_PERFORMANCE,
-    INTENT_POD_PERFORMANCE,
-    INTENT_STUDENT_PROFILE,
-    INTENT_SCORE_DISTRIBUTION,
+    INTENT_POD_WHO_SOLVED_TODAY,
+    INTENT_POD_ATTEMPT_COUNT_TODAY,
+    INTENT_POD_QUESTION_TODAY,
+    INTENT_POD_FASTEST_SOLVER,
+    INTENT_POD_NOT_ATTEMPTED_TODAY,
+    INTENT_POD_PASS_FAIL_SUMMARY,
+    INTENT_POD_PASS_RATE,
+    INTENT_POD_TOP_PASSERS,
+    INTENT_POD_NEVER_PASSED,
+    INTENT_POD_WEEKLY_PASSERS,
+    INTENT_POD_DIFFICULTY_BREAKDOWN,
+    INTENT_POD_LANGUAGE_BREAKDOWN,
+    INTENT_POD_HARD_SOLVERS,
+    INTENT_POD_LONGEST_STREAK,
+    INTENT_POD_ACTIVE_STREAKS,
+    INTENT_POD_LOST_STREAK,
+    INTENT_POD_TOP_COINS,
+    INTENT_POD_TOTAL_POINTS_TODAY,
+    INTENT_POD_TOP_SCORERS,
+    INTENT_POD_BADGE_EARNERS,
+    INTENT_POD_WEEKLY_BADGE_EARNERS,
     INTENT_UNKNOWN,
 ]
-
-# LLM model
-LLM_MODEL = "gpt-4o-mini"
-LLM_TEMPERATURE = 0.0
-LLM_MAX_TOKENS = 512
