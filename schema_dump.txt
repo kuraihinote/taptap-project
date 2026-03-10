@@ -1,0 +1,126 @@
+--- user ---
+id: character varying
+create_at: timestamp with time zone
+update_at: timestamp with time zone
+first_name: character varying
+role: text
+last_name: character varying
+phone: character varying
+email: character varying
+dob: timestamp with time zone
+old_user_id: integer
+image: text
+city_id: integer
+state_id: integer
+college_id: integer
+department_id: integer
+roll_number: character varying
+is_bbtraining: boolean
+is_bbverified: boolean
+original_user_id: character varying
+generated_resume_url: character varying
+is_placed: boolean
+strong_in: ARRAY
+weak_in: ARRAY
+average_in: ARRAY
+top_three_skills: ARRAY
+access_to_student_login: boolean
+company_id: integer
+share_profile_id: character varying
+can_create_admin: boolean
+password: character varying
+is_employability_summary_public: boolean
+address: character varying
+expo_token: character varying
+user_chat_status: text
+active_streak_count: integer
+has_claimed_free_credit: boolean
+has_seen_upselling_page: boolean
+is_verified: boolean
+is_every_test_type_allowed: boolean
+--- combined_leaderboard ---
+userId: character varying
+profileImageUrl: text
+overallRank: bigint
+collegeRank: bigint
+stateRank: bigint
+collegeGroupRank: bigint
+aptitudePercentage: numeric
+englishPercentage: numeric
+codingPercentage: numeric
+codingRank: bigint
+englishRank: bigint
+aptitudeRank: bigint
+employabilityBand: text
+employabilityScore: numeric
+lastMonthPercentage: numeric
+lastMonthRank: bigint
+lastMonthAptitudeScore: numeric
+lastMonthCodingScore: numeric
+lastMonthEnglishScore: numeric
+currentMonthAptitudeScore: numeric
+currentMonthCodingScore: numeric
+currentMonthEnglishScore: numeric
+metCount: bigint
+bbVerifiedSkills: text
+bbVerifiedSkillsWithRating: jsonb
+strongAreas: ARRAY
+weakAreas: ARRAY
+weakAreasScore: ARRAY
+allSubDomains: ARRAY
+tenthPercentage: double precision
+tenthBoard: text
+twelfthPercentage: double precision
+twelfthBoard: text
+degreePercentage: double precision
+degree: text
+branch: text
+yearOfPassing: double precision
+codingScore: numeric
+codingAccuracy: numeric
+pythonScore: numeric
+pythonAccuracy: numeric
+c++Score: numeric
+c++Accuracy: numeric
+cScore: numeric
+cAccuracy: numeric
+javaScore: numeric
+javaAccuracy: numeric
+sqlScore: numeric
+sqlAccuracy: numeric
+groups: text
+technologies: text
+tools: text
+programmingLanguages: text
+frameworks: text
+english_proficiency_tests_data: text
+name: text
+email: character varying
+mobileNo: character varying
+status: text
+collegeId: integer
+regNo: character varying
+collegeState: integer
+collegeName: character varying
+collegeCode: character varying
+collegeGroupId: integer
+stateName: character varying
+bbTraining: ARRAY
+profileScore: integer
+englishProficiencyTests: jsonb
+profileVideoLink: text
+profileSummary: text
+linkedinId: text
+githubId: text
+leetCodeId: text
+hackerRankId: text
+topThreeSkills: text
+certificateDomains: text
+projectDomains: text
+allDegrees: ARRAY
+experience: boolean
+resumeLink: character varying
+dob: timestamp with time zone
+shareProfileId: character varying
+gender: text
+category: text
