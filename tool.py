@@ -218,14 +218,20 @@ def pod_student_profile_tool(
     college_name: Optional[str] = None,
     date_filter: Optional[str] = None,
     info_type: str = "all",
+    language: Optional[str] = None,
+    week_filter: Optional[bool] = None,
+    pod_type: Optional[str] = None,
 ) -> dict:
     """Get a student's full POD profile — submissions, streaks, badges, coins."""
-    logger.info(f"[tool] pod_student_profile student={student_name} date={date_filter} type={info_type}")
+    logger.info(f"[tool] pod_student_profile student={student_name} date={date_filter} type={info_type} lang={language} week={week_filter} pod_type={pod_type}")
     return analytics.get_student_profile(
         student_name=student_name,
         college_name=college_name,
         date_filter=date_filter,
         info_type=info_type,
+        language=language,
+        week_filter=week_filter,
+        pod_type=pod_type,
     )
 
 # ── Tool registry ─────────────────────────────────────────────────────────────

@@ -532,6 +532,9 @@ def get_student_profile(
     college_name: Optional[str] = None,
     date_filter: Optional[str] = None,
     info_type: str = "all",
+    language: Optional[str] = None,
+    week_filter: Optional[bool] = None,
+    pod_type: Optional[str] = None,
 ) -> dict:
     """Full student POD profile — submissions, streaks, badges, coins."""
     try:
@@ -542,22 +545,44 @@ def get_student_profile(
             date_clause = "AND ps.create_at::date = CURRENT_DATE"
         elif date_filter:
             date_clause = f"AND ps.create_at::date = '{date_filter}'"
+        elif week_filter:
+            date_clause = "AND ps.create_at::date >= date_trunc('week', CURRENT_DATE)"
         else:
             date_clause = ""
 
-        college_clause = "AND c.name ILIKE :college" if college_name else ""
-        name_clause = "AND (u.first_name || ' ' || u.last_name) ILIKE :student_name"
-
+        # Initialize params first
         params = {
             "student_name": f"%{student_name}%",
         }
         if college_name:
             params["college"] = f"%{college_name}%"
 
+        college_clause = "AND c.name ILIKE :college" if college_name else ""
+        name_clause = "AND (u.first_name || ' ' || u.last_name) ILIKE :student_name"
+
+        # Build language clause
+        language_clause = ""
+        if language:
+            params["language"] = f"%{language}%"
+            language_clause = "AND ps.language ILIKE :language"
+
+        # Build pod_type clause — joins to problem_of_the_day to filter by coding/aptitude/verbal
+        pod_type_join = ""
+        pod_type_clause = ""
+        if pod_type:
+            params["pod_type"] = pod_type.lower()
+            pod_type_join = "JOIN pod.problem_of_the_day potd ON potd.id = ps.problem_of_the_day_id"
+            pod_type_clause = "AND potd.type = :pod_type"
+
         result = {}
 
+        # Normalize info_type — handle combined values like "streaks, badges"
+        info_types = [i.strip() for i in info_type.replace(" and ", ",").split(",")]
+        def should_fetch(section):
+            return "all" in info_types or section in info_types
+
         # ── Submissions ───────────────────────────────────────────────────
-        if info_type in ("all", "submissions"):
+        if should_fetch("submissions"):
             rows = db.execute(text(f"""
                 SELECT u.first_name || ' ' || u.last_name AS name,
                        u.email, c.name AS college,
@@ -567,17 +592,20 @@ def get_student_profile(
                 FROM pod.pod_submission ps
                 JOIN public.user u ON u.id = ps.user_id
                 JOIN public.college c ON c.id = u.college_id
+                {pod_type_join}
                 WHERE u.role = 'Student'
                   {name_clause}
                   {college_clause}
                   {date_clause}
+                  {language_clause}
+                  {pod_type_clause}
                 ORDER BY ps.create_at DESC
                 LIMIT 20
             """), params).fetchall()
             result["submissions"] = _rows_to_dicts(rows)
 
         # ── Streaks ───────────────────────────────────────────────────────
-        if info_type in ("all", "streaks"):
+        if should_fetch("streaks"):
             rows = db.execute(text(f"""
                 SELECT u.first_name || ' ' || u.last_name AS name,
                        c.name AS college,
@@ -594,7 +622,7 @@ def get_student_profile(
             result["streaks"] = _rows_to_dicts(rows)
 
         # ── Badges ────────────────────────────────────────────────────────
-        if info_type in ("all", "badges"):
+        if should_fetch("badges"):
             rows = db.execute(text(f"""
                 SELECT u.first_name || ' ' || u.last_name AS name,
                        c.name AS college,
@@ -613,7 +641,7 @@ def get_student_profile(
             result["badges"] = _rows_to_dicts(rows)
 
         # ── Coins ─────────────────────────────────────────────────────────
-        if info_type in ("all", "coins"):
+        if should_fetch("coins"):
             rows = db.execute(text(f"""
                 SELECT u.first_name || ' ' || u.last_name AS name,
                        c.name AS college,

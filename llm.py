@@ -166,7 +166,7 @@ pod_weekly_badge_earners
 
 --- STUDENT PROFILE ---
 pod_student_profile
-  params: student_name (str, required — full or partial name of the student), college_name (str, optional), date_filter (str, optional — "today" or "YYYY-MM-DD"), info_type (str, optional — "submissions", "streaks", "badges", "coins", or "all" — default "all")
+  params: student_name (str, required — full or partial name of the student), college_name (str, optional), date_filter (str, optional — "today" or "YYYY-MM-DD"), info_type (str, optional — "submissions", "streaks", "badges", "coins", or "all" — default "all", can also be combined like "streaks, badges"), language (str, optional — the specific programming language used e.g. "python", "java", "c", "cpp", "javascript", "sql". Only set if user mentions a specific programming language like "in python" or "using java"), week_filter (bool, optional — set true if user says "this week"), pod_type (str, optional — the POD category: "coding", "aptitude", or "verbal". Set this when user says "coding problems", "aptitude questions", "verbal questions", "in coding", "in aptitude", "in verbal")
 
 --- FALLBACK ---
 unknown
