@@ -84,6 +84,7 @@ def _render_data(data, intent: str) -> None:
             data=csv,
             file_name="pod_result.csv",
             mime="text/csv",
+            key=f"dl_list_{id(data)}",
         )
 
 
