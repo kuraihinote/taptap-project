@@ -8,16 +8,11 @@
 
 import json
 import decimal
-import datetime
-import inspect
-import os
+from datetime import datetime, date
 from typing import Any
 
-from dotenv import load_dotenv
 from langchain_openai import AzureChatOpenAI
 from langgraph.graph import StateGraph, END
-
-load_dotenv()
 
 from constants import (
     LLM_TEMPERATURE, LLM_MAX_TOKENS,
@@ -39,16 +34,8 @@ from tool import TOOL_MAP
 from logger import logger
 
 
-# ── Azure OpenAI LLM setup ────────────────────────────────────────────────────
-
-_llm = AzureChatOpenAI(
-    azure_deployment=os.getenv("AZURE_OPENAI_DEPLOYMENT", "gpt-4o-mini"),
-    azure_endpoint=os.getenv("AZURE_OPENAI_ENDPOINT"),
-    api_key=os.getenv("AZURE_OPENAI_API_KEY"),
-    api_version=os.getenv("AZURE_OPENAI_API_VERSION", "2025-01-01-preview"),
-    temperature=LLM_TEMPERATURE,
-    max_tokens=LLM_MAX_TOKENS,
-)
+# ── LLM — imported from models.py (matches reference project pattern) ─────────
+from models import gpt_4o_mini_llm as _llm
 
 
 # ── JSON helper — handles Decimal and asyncpg int types from PostgreSQL ───────
@@ -57,7 +44,7 @@ class _SafeEncoder(json.JSONEncoder):
     def default(self, obj):
         if isinstance(obj, decimal.Decimal):
             return float(obj)
-        if isinstance(obj, (datetime.datetime, datetime.date)):
+        if isinstance(obj, (datetime, date)):
             return obj.isoformat()
         if hasattr(obj, "__int__") and not isinstance(obj, (bool, float, str)):
             try:
@@ -100,22 +87,93 @@ INTENT_TO_TOOL: dict[str, str] = {
 
 # ── Classification prompt ─────────────────────────────────────────────────────
 
-CLASSIFY_SYSTEM = f"""You are an intent classifier for a college faculty analytics chatbot focused on POD (Problem of the Day).
-Classify the user message into ONE of these intents:
-{json.dumps(ALL_INTENTS, indent=2)}
+CLASSIFY_SYSTEM = """You are an intent classifier for a college faculty analytics chatbot.
+Faculty ask questions about POD (Problem of the Day) student activity.
 
-Also extract any relevant parameters. Possible parameters:
-- college_name (str): college name mentioned or implied
-- limit (int): number of results requested, default 10
-- date_filter (str): use "today" if user says today/right now, or "YYYY-MM-DD" for a specific date, omit otherwise
-- min_streak (int): minimum streak length mentioned, default 3
+Classify the message into ONE of these intents and extract the relevant parameters listed for each:
 
-Respond ONLY with valid JSON in this exact shape:
-{{
+--- DAILY ACTIVITY ---
+pod_who_solved_today
+  params: college_name (str, optional)
+
+pod_attempt_count_today
+  params: college_name (str, optional)
+
+pod_question_today
+  params: (none)
+
+pod_fastest_solver
+  params: college_name (str, optional), limit (int, default 10)
+
+pod_not_attempted_today
+  params: college_name (str, optional), limit (int, default 20)
+
+--- PASS / FAIL PERFORMANCE ---
+pod_pass_fail_summary
+  params: college_name (str, optional), date_filter (str, optional — use "today" if user says today, or "YYYY-MM-DD" for a specific date), limit (int, default 20)
+
+pod_pass_rate
+  params: college_name (str, optional)
+
+pod_top_passers
+  params: college_name (str, optional), limit (int, default 10)
+
+pod_never_passed
+  params: college_name (str, optional), limit (int, default 20)
+
+pod_weekly_passers
+  params: college_name (str, optional), limit (int, default 20)
+
+--- DIFFICULTY & LANGUAGE ---
+pod_difficulty_breakdown
+  params: college_name (str, optional)
+
+pod_language_breakdown
+  params: college_name (str, optional)
+
+pod_hard_solvers
+  params: college_name (str, optional), limit (int, default 20)
+
+--- STREAKS & CONSISTENCY ---
+pod_longest_streak
+  params: college_name (str, optional), limit (int, default 10)
+
+pod_active_streaks
+  params: college_name (str, optional), min_streak (int, default 3 — minimum streak length to include), limit (int, default 20)
+
+pod_lost_streak
+  params: college_name (str, optional), limit (int, default 20)
+
+--- POINTS & COINS ---
+pod_top_coins
+  params: college_name (str, optional), limit (int, default 10)
+
+pod_total_points_today
+  params: college_name (str, optional)
+
+pod_top_scorers
+  params: college_name (str, optional), limit (int, default 10)
+
+--- BADGES ---
+pod_badge_earners
+  params: college_name (str, optional), limit (int, default 20)
+
+pod_weekly_badge_earners
+  params: college_name (str, optional), limit (int, default 20)
+
+--- FALLBACK ---
+unknown
+  params: (none) — use when the question is not related to POD
+
+Respond ONLY with valid JSON in this exact shape — no explanation, no markdown:
+{
   "intent": "<intent_label>",
-  "params": {{}}
-}}
-Do NOT include explanation or markdown fences.
+  "params": {
+    "college_name": "...",
+    "limit": 10
+  }
+}
+Only include params that are relevant to the detected intent. Omit params not mentioned by the user.
 """
 
 
@@ -179,15 +237,7 @@ async def execute_node(state: GraphState) -> dict[str, Any]:
     logger.info(f"[execute] calling tool={tool_name} params={params}")
 
     try:
-        # FIX: filter params to only what this tool's function actually accepts.
-        # classify_node injects college_name into ALL params, but some tools
-        # (e.g. pod_question_today_tool) take zero arguments — passing extra
-        # kwargs causes a TypeError. inspect.signature filters them safely.
-        sig = inspect.signature(tool_fn.coroutine)
-        filtered_params = {k: v for k, v in params.items() if k in sig.parameters}
-        logger.info(f"[execute] filtered_params={filtered_params}")
-
-        result = await tool_fn.coroutine(**filtered_params)
+        result = await tool_fn.ainvoke(params)
         return {"data": result}
     except Exception as exc:
         logger.error(f"[execute] tool error: {exc}")
@@ -205,7 +255,7 @@ Rules:
 - Round numbers to 2 decimal places.
 - If data is empty or [], say "No data found for that query."
 - Do NOT invent values not present in the data.
-- Refer to columns naturally — e.g. "streak_count" -> "streak", "obtained_score" -> "score".
+- Refer to columns naturally — e.g. "streak_count" → "streak", "obtained_score" → "score".
 """
 
 
