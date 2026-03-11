@@ -130,7 +130,7 @@ with st.sidebar:
         "Who lost their streak recently?",
         "Who has the most coins?",
         "Total points earned today",
-        "Show top scorers",
+        "Who has the most points overall?",
         "Who earned badges?",
         "Who earned badges this week?",
         "What did Pranith Kumar Navath solve today?",

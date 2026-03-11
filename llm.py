@@ -153,8 +153,9 @@ pod_top_coins
 pod_total_points_today
   params: college_name (str, optional)
 
-pod_top_scorers
+pod_top_scorers — students ranked by total POD score/points earned overall
   params: college_name (str, optional), limit (int, default 10)
+  use this for: "who has the most points", "show leaderboard", "top students by score", "highest scoring students", "who scored the most", "points leaderboard", "overall points ranking", "most points overall"
 
 --- BADGES ---
 pod_badge_earners
