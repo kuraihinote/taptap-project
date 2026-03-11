@@ -5,7 +5,7 @@
 #   2. LangGraph state  — TypedDict shared across classify→execute→format
 #   3. LLM instantiation — gpt_4o_mini_llm imported by llm.py
 
-from typing import Any, Optional
+from typing import Any, Optional, Union
 from pydantic import BaseModel, Field
 from typing_extensions import TypedDict
 from langchain_openai import AzureChatOpenAI
@@ -26,7 +26,7 @@ class ChatRequest(BaseModel):
 class ChatResponse(BaseModel):
     answer: str
     intent: str
-    data: Optional[list[dict[str, Any]]] = None
+    data: Optional[Union[list[dict[str, Any]], dict[str, Any]]] = None
     error: Optional[str] = None
 
 
@@ -39,7 +39,7 @@ class GraphState(TypedDict, total=False):
     college_name: Optional[str]
     intent:       str
     params:       dict[str, Any]
-    data:         Optional[list[dict[str, Any]]]
+    data:         Optional[Union[list[dict[str, Any]], dict[str, Any]]]
     answer:       str
     error:        Optional[str]
 

@@ -68,8 +68,9 @@ def get_question_today() -> list[dict]:
         db = next(get_db())
         result = db.execute(text("""
             SELECT id, date, difficulty, type, unique_user_attempts, is_active
-            FROM pod.problem_of_the_day WHERE date = :today
-        """), {"today": date.today()}).fetchall()
+            FROM pod.problem_of_the_day
+            WHERE date = (SELECT MAX(date) FROM pod.problem_of_the_day)
+        """)).fetchall()
         return _rows_to_dicts(result)
     except Exception as e:
         logger.error(f"get_question_today error: {e}")
@@ -86,11 +87,12 @@ def get_fastest_solvers(college_name: Optional[str] = None, limit: int = 10) -> 
             params["college"] = f"%{college_name}%"
         result = db.execute(text(f"""
             SELECT u.first_name || ' ' || u.last_name AS name,
-                   c.name AS college, pa.time_taken, pa.pod_started_at, pa.end_date
+                   c.name AS college, ROUND(pa.time_taken / 1000.0, 1) AS time_taken_seconds,
+                   pa.pod_started_at, pa.end_date
             FROM pod.pod_attempt pa
             JOIN public.user u ON u.id = pa.user_id
             JOIN public.college c ON c.id = u.college_id
-            WHERE pa.create_at::date = :today AND pa.status = 'pass'
+            WHERE pa.create_at::date = :today AND pa.status = 'completed'
               AND pa.time_taken IS NOT NULL {college_clause}
             ORDER BY pa.time_taken ASC LIMIT :limit
         """), params).fetchall()
@@ -523,3 +525,112 @@ def get_weekly_badge_earners(college_name: Optional[str] = None, limit: int = 20
     except Exception as e:
         logger.error(f"get_weekly_badge_earners error: {e}")
         return []
+
+
+def get_student_profile(
+    student_name: str,
+    college_name: Optional[str] = None,
+    date_filter: Optional[str] = None,
+    info_type: str = "all",
+) -> dict:
+    """Full student POD profile — submissions, streaks, badges, coins."""
+    try:
+        db = next(get_db())
+
+        # Build date clause
+        if date_filter == "today":
+            date_clause = "AND ps.create_at::date = CURRENT_DATE"
+        elif date_filter:
+            date_clause = f"AND ps.create_at::date = '{date_filter}'"
+        else:
+            date_clause = ""
+
+        college_clause = "AND c.name ILIKE :college" if college_name else ""
+        name_clause = "AND (u.first_name || ' ' || u.last_name) ILIKE :student_name"
+
+        params = {
+            "student_name": f"%{student_name}%",
+        }
+        if college_name:
+            params["college"] = f"%{college_name}%"
+
+        result = {}
+
+        # ── Submissions ───────────────────────────────────────────────────
+        if info_type in ("all", "submissions"):
+            rows = db.execute(text(f"""
+                SELECT u.first_name || ' ' || u.last_name AS name,
+                       u.email, c.name AS college,
+                       ps.title, ps.language, ps.difficulty,
+                       ps.status, ps.obtained_score, ps.pod_coins,
+                       ps.create_at
+                FROM pod.pod_submission ps
+                JOIN public.user u ON u.id = ps.user_id
+                JOIN public.college c ON c.id = u.college_id
+                WHERE u.role = 'Student'
+                  {name_clause}
+                  {college_clause}
+                  {date_clause}
+                ORDER BY ps.create_at DESC
+                LIMIT 20
+            """), params).fetchall()
+            result["submissions"] = _rows_to_dicts(rows)
+
+        # ── Streaks ───────────────────────────────────────────────────────
+        if info_type in ("all", "streaks"):
+            rows = db.execute(text(f"""
+                SELECT u.first_name || ' ' || u.last_name AS name,
+                       c.name AS college,
+                       ps.type, ps.streak_count,
+                       ps.is_active, ps.start_date, ps.end_date
+                FROM pod.pod_streak ps
+                JOIN public.user u ON u.id = ps.user_id
+                JOIN public.college c ON c.id = u.college_id
+                WHERE u.role = 'Student'
+                  {name_clause}
+                  {college_clause}
+                ORDER BY ps.streak_count DESC
+            """), params).fetchall()
+            result["streaks"] = _rows_to_dicts(rows)
+
+        # ── Badges ────────────────────────────────────────────────────────
+        if info_type in ("all", "badges"):
+            rows = db.execute(text(f"""
+                SELECT u.first_name || ' ' || u.last_name AS name,
+                       c.name AS college,
+                       pb.name AS badge_name,
+                       pb.description, pb.badge_type, pb.pod_category,
+                       upb.create_at AS earned_at
+                FROM pod.user_pod_badge upb
+                JOIN public.user u ON u.id = upb.user_id
+                JOIN pod.pod_badge pb ON pb.id = upb.pod_badge_id
+                JOIN public.college c ON c.id = u.college_id
+                WHERE u.role = 'Student'
+                  {name_clause}
+                  {college_clause}
+                ORDER BY upb.create_at DESC
+            """), params).fetchall()
+            result["badges"] = _rows_to_dicts(rows)
+
+        # ── Coins ─────────────────────────────────────────────────────────
+        if info_type in ("all", "coins"):
+            rows = db.execute(text(f"""
+                SELECT u.first_name || ' ' || u.last_name AS name,
+                       c.name AS college,
+                       SUM(uc.coins_count) AS total_coins,
+                       COUNT(uc.id) AS total_transactions
+                FROM pod.user_coins uc
+                JOIN public.user u ON u.id = uc.user_id
+                JOIN public.college c ON c.id = u.college_id
+                WHERE u.role = 'Student'
+                  {name_clause}
+                  {college_clause}
+                GROUP BY u.id, u.first_name, u.last_name, c.name
+            """), params).fetchall()
+            result["coins"] = _rows_to_dicts(rows)
+
+        return result
+
+    except Exception as e:
+        logger.error(f"get_student_profile error: {e}")
+        return {}

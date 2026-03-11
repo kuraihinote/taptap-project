@@ -210,6 +210,24 @@ def pod_weekly_badge_earners_tool(
     return analytics.get_weekly_badge_earners(college_name=college_name, limit=limit)
 
 
+
+
+@tool
+def pod_student_profile_tool(
+    student_name: str,
+    college_name: Optional[str] = None,
+    date_filter: Optional[str] = None,
+    info_type: str = "all",
+) -> dict:
+    """Get a student's full POD profile — submissions, streaks, badges, coins."""
+    logger.info(f"[tool] pod_student_profile student={student_name} date={date_filter} type={info_type}")
+    return analytics.get_student_profile(
+        student_name=student_name,
+        college_name=college_name,
+        date_filter=date_filter,
+        info_type=info_type,
+    )
+
 # ── Tool registry ─────────────────────────────────────────────────────────────
 
 ALL_TOOLS = [
@@ -234,6 +252,7 @@ ALL_TOOLS = [
     pod_top_scorers_tool,
     pod_badge_earners_tool,
     pod_weekly_badge_earners_tool,
+    pod_student_profile_tool,
 ]
 
 # Dict keyed by tool name — used by llm.py to look up and call tools by name

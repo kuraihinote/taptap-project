@@ -28,6 +28,7 @@ from constants import (
     INTENT_POD_TOP_COINS, INTENT_POD_TOTAL_POINTS_TODAY,
     INTENT_POD_TOP_SCORERS, INTENT_POD_BADGE_EARNERS,
     INTENT_POD_WEEKLY_BADGE_EARNERS,
+    INTENT_POD_STUDENT_PROFILE,
 )
 from models import GraphState
 from tool import TOOL_MAP
@@ -82,6 +83,7 @@ INTENT_TO_TOOL: dict[str, str] = {
     INTENT_POD_TOP_SCORERS:          "pod_top_scorers_tool",
     INTENT_POD_BADGE_EARNERS:        "pod_badge_earners_tool",
     INTENT_POD_WEEKLY_BADGE_EARNERS: "pod_weekly_badge_earners_tool",
+    INTENT_POD_STUDENT_PROFILE:       "pod_student_profile_tool",
 }
 
 
@@ -160,6 +162,10 @@ pod_badge_earners
 
 pod_weekly_badge_earners
   params: college_name (str, optional), limit (int, default 20)
+
+--- STUDENT PROFILE ---
+pod_student_profile
+  params: student_name (str, required — full or partial name of the student), college_name (str, optional), date_filter (str, optional — "today" or "YYYY-MM-DD"), info_type (str, optional — "submissions", "streaks", "badges", "coins", or "all" — default "all")
 
 --- FALLBACK ---
 unknown
@@ -253,7 +259,6 @@ Rules:
 - NEVER reconstruct or redraw the data as a table — the UI already shows the full table.
 - Write 2-5 concise bullet points highlighting the key insights.
 - Round numbers to 2 decimal places.
-- If data is empty or [], say "No data found for that query."
 - Do NOT invent values not present in the data.
 - Refer to columns naturally — e.g. "streak_count" → "streak", "obtained_score" → "score".
 """
@@ -267,6 +272,11 @@ async def format_node(state: GraphState) -> dict[str, Any]:
         return {}
 
     data = state.get("data") or []
+
+    # Check empty in code — never let the LLM decide if data exists or not
+    if not data:
+        return {"answer": "No data found for that query."}
+
     data_str = _safe_json(data)
     logger.info(f"[format] formatting {len(data)} rows")
 

@@ -56,6 +56,7 @@ INTENT_POD_TOTAL_POINTS_TODAY     = "pod_total_points_today"
 INTENT_POD_TOP_SCORERS            = "pod_top_scorers"
 INTENT_POD_BADGE_EARNERS          = "pod_badge_earners"
 INTENT_POD_WEEKLY_BADGE_EARNERS   = "pod_weekly_badge_earners"
+INTENT_POD_STUDENT_PROFILE        = "pod_student_profile"
 INTENT_UNKNOWN                    = "unknown"
 
 ALL_INTENTS = [
@@ -80,5 +81,6 @@ ALL_INTENTS = [
     INTENT_POD_TOP_SCORERS,
     INTENT_POD_BADGE_EARNERS,
     INTENT_POD_WEEKLY_BADGE_EARNERS,
+    INTENT_POD_STUDENT_PROFILE,
     INTENT_UNKNOWN,
 ]

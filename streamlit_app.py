@@ -44,6 +44,49 @@ def _render_chart(df: pd.DataFrame, intent: str) -> None:
         pass  # Charts are best-effort
 
 
+# ── Data renderer — handles both list and dict (student profile) ──────────────
+
+def _render_data(data, intent: str) -> None:
+    """Render data as table(s). data can be a list of dicts or a dict of sections."""
+    if not data:
+        return
+
+    if isinstance(data, dict):
+        # Student profile — render each section as its own table
+        section_labels = {
+            "submissions": "📝 Submissions",
+            "streaks":     "🔥 Streaks",
+            "badges":      "🏅 Badges",
+            "coins":       "🪙 Coins",
+        }
+        for key, label in section_labels.items():
+            rows = data.get(key, [])
+            if rows:
+                st.markdown(f"**{label}**")
+                df = pd.DataFrame(rows)
+                st.dataframe(df, use_container_width=True)
+                csv = df.to_csv(index=False)
+                st.download_button(
+                    f"⬇️ Download {label} CSV",
+                    data=csv,
+                    file_name=f"pod_{key}.csv",
+                    mime="text/csv",
+                    key=f"dl_{key}_{id(data)}",
+                )
+    else:
+        # Regular list response
+        df = pd.DataFrame(data)
+        st.dataframe(df, use_container_width=True)
+        _render_chart(df, intent)
+        csv = df.to_csv(index=False)
+        st.download_button(
+            "⬇️ Download CSV",
+            data=csv,
+            file_name="pod_result.csv",
+            mime="text/csv",
+        )
+
+
 # ── Session state ─────────────────────────────────────────────────────────────
 
 if "messages" not in st.session_state:
@@ -89,6 +132,7 @@ with st.sidebar:
         "Show top scorers",
         "Who earned badges?",
         "Who earned badges this week?",
+        "What did Pranith Kumar Navath solve today?",
     ]
     for ex in examples:
         if st.button(ex, use_container_width=True):
@@ -123,16 +167,7 @@ for msg in st.session_state.messages:
         st.markdown(msg["content"])
         if msg.get("data"):
             with st.expander("📊 View raw data"):
-                df = pd.DataFrame(msg["data"])
-                st.dataframe(df, use_container_width=True)
-                csv = df.to_csv(index=False)
-                st.download_button(
-                    "⬇️ Download CSV",
-                    data=csv,
-                    file_name="pod_result.csv",
-                    mime="text/csv",
-                    key=f"dl_{id(msg)}",
-                )
+                _render_data(msg["data"], msg.get("intent", ""))
         if msg.get("intent"):
             st.caption(f"Intent: `{msg['intent']}`")
 
@@ -172,16 +207,7 @@ if query:
 
                 if data:
                     with st.expander("📊 View raw data"):
-                        df = pd.DataFrame(data)
-                        st.dataframe(df, use_container_width=True)
-                        _render_chart(df, intent)
-                        csv = df.to_csv(index=False)
-                        st.download_button(
-                            "⬇️ Download CSV",
-                            data=csv,
-                            file_name="pod_result.csv",
-                            mime="text/csv",
-                        )
+                        _render_data(data, intent)
 
                 if error:
                     st.error(f"Backend error: {error}")
