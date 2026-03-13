@@ -27,8 +27,13 @@ from constants import (
     INTENT_POD_ACTIVE_STREAKS, INTENT_POD_LOST_STREAK,
     INTENT_POD_TOP_COINS, INTENT_POD_TOTAL_POINTS_TODAY,
     INTENT_POD_TOP_SCORERS, INTENT_POD_BADGE_EARNERS,
-    INTENT_POD_WEEKLY_BADGE_EARNERS,
-    INTENT_POD_STUDENT_PROFILE,
+    INTENT_POD_WEEKLY_BADGE_EARNERS, INTENT_POD_STUDENT_PROFILE,
+    INTENT_EMP_TOP_SCORERS, INTENT_EMP_DIFFICULTY_STATS,
+    INTENT_EMP_LANGUAGE_STATS, INTENT_EMP_DOMAIN_BREAKDOWN,
+    INTENT_EMP_SUBDOMAIN_BREAKDOWN, INTENT_EMP_QUESTION_TYPE_STATS,
+    INTENT_EMP_MOST_SOLVED, INTENT_EMP_RECENT_ACTIVITY,
+    INTENT_EMP_HARDEST_QUESTIONS, INTENT_EMP_DAILY_TREND,
+    INTENT_EMP_PASS_RATE, INTENT_EMP_USER_PROFILE,
 )
 from models import GraphState
 from tool import TOOL_MAP
@@ -62,6 +67,7 @@ def _safe_json(data: Any) -> str:
 # ── Intent → Tool name mapping ────────────────────────────────────────────────
 
 INTENT_TO_TOOL: dict[str, str] = {
+    # POD
     INTENT_POD_WHO_SOLVED_TODAY:     "pod_who_solved_today_tool",
     INTENT_POD_ATTEMPT_COUNT_TODAY:  "pod_attempt_count_today_tool",
     INTENT_POD_QUESTION_TODAY:       "pod_question_today_tool",
@@ -83,18 +89,70 @@ INTENT_TO_TOOL: dict[str, str] = {
     INTENT_POD_TOP_SCORERS:          "pod_top_scorers_tool",
     INTENT_POD_BADGE_EARNERS:        "pod_badge_earners_tool",
     INTENT_POD_WEEKLY_BADGE_EARNERS: "pod_weekly_badge_earners_tool",
-    INTENT_POD_STUDENT_PROFILE:       "pod_student_profile_tool",
+    INTENT_POD_STUDENT_PROFILE:      "pod_student_profile_tool",
+    # Employability
+    INTENT_EMP_TOP_SCORERS:          "emp_top_scorers_tool",
+    INTENT_EMP_DIFFICULTY_STATS:     "emp_difficulty_stats_tool",
+    INTENT_EMP_LANGUAGE_STATS:       "emp_language_stats_tool",
+    INTENT_EMP_DOMAIN_BREAKDOWN:     "emp_domain_breakdown_tool",
+    INTENT_EMP_SUBDOMAIN_BREAKDOWN:  "emp_subdomain_breakdown_tool",
+    INTENT_EMP_QUESTION_TYPE_STATS:  "emp_question_type_stats_tool",
+    INTENT_EMP_MOST_SOLVED:          "emp_most_solved_tool",
+    INTENT_EMP_RECENT_ACTIVITY:      "emp_recent_activity_tool",
+    INTENT_EMP_HARDEST_QUESTIONS:    "emp_hardest_questions_tool",
+    INTENT_EMP_DAILY_TREND:          "emp_daily_trend_tool",
+    INTENT_EMP_PASS_RATE:            "emp_pass_rate_tool",
+    INTENT_EMP_USER_PROFILE:         "emp_user_profile_tool",
 }
 
 
 # ── Classification prompt ─────────────────────────────────────────────────────
 
 CLASSIFY_SYSTEM = """You are an intent classifier for a college faculty analytics chatbot.
-Faculty ask questions about POD (Problem of the Day) student activity.
+Faculty ask questions about POD (Problem of the Day) and Employability Track student activity.
 
-Classify the message into ONE of these intents and extract the relevant parameters listed for each:
+════════════════════════════════════════════════════════
+CRITICAL RULES — READ THESE FIRST BEFORE CLASSIFYING
+════════════════════════════════════════════════════════
 
---- DAILY ACTIVITY ---
+RULE 1 — SINGLE INTENT ONLY:
+You can only return ONE intent per message. If the user asks about both POD and Employability
+in one sentence (e.g. "Compare POD vs employability"), pick the PRIMARY module they mentioned
+first or the one with more detail. Never return "unknown" just because two modules are mentioned.
+
+RULE 2 — COLLEGE NAME vs STUDENT NAME:
+College names: SRM, VIT, Anna University, CMRIT, Geethanjali, etc. → use college_name param.
+Student names: individual person names like "Rahul", "Priya", "Rentachintala PRIYANKA" → use student_name param.
+NEVER put a college name into student_name. If a query says "from SRM students", that is college_name="SRM".
+
+RULE 3 — DO NOT HALLUCINATE PARAMS:
+Only extract params the user explicitly mentioned. If the user says "weakest students in Algorithms"
+they did NOT mention difficulty — do NOT add difficulty="hard". Extract only what is stated.
+
+RULE 4 — STUDENT PROFILE MODULE DEFAULT:
+If a user asks "how is [name] doing?" or "[name]'s performance" with NO module mentioned,
+default to pod_student_profile. Only use emp_user_profile if the user explicitly says
+"employability" or "employability track".
+
+RULE 5 — DOMAIN QUERIES GO TO emp_domain_breakdown:
+"pass rate for Data Structures", "how are students doing in Algorithms", "performance in Mathematics"
+→ these are emp_domain_breakdown with domain_name set. NOT unknown. NOT emp_subdomain_breakdown.
+
+RULE 6 — "WEAKEST STUDENTS IN [DOMAIN]":
+"weakest students in Algorithms", "who struggles with Data Structures" → emp_subdomain_breakdown
+with domain_name set. This shows per-topic pass rates within that domain.
+Do NOT use emp_hardest_questions for student-focused weakness queries.
+
+RULE 7 — emp_user_profile NEVER uses info_type:
+emp_user_profile always returns all sections (summary, submissions, question status).
+Do NOT extract info_type, streaks, badges etc. for emp_user_profile. Those params only apply
+to pod_student_profile.
+
+════════════════════════════════════════════════════════
+INTENT DEFINITIONS
+════════════════════════════════════════════════════════
+
+--- POD: DAILY ACTIVITY ---
 pod_who_solved_today
   params: college_name (str, optional)
 
@@ -110,12 +168,14 @@ pod_fastest_solver
 pod_not_attempted_today
   params: college_name (str, optional), limit (int, default 20)
 
---- PASS / FAIL PERFORMANCE ---
+--- POD: PASS / FAIL ---
 pod_pass_fail_summary
-  params: college_name (str, optional), date_filter (str, optional — use "today" if user says today, or "YYYY-MM-DD" for a specific date), limit (int, default 20)
+  params: college_name (str, optional), date_filter (str, optional — "today" or "YYYY-MM-DD"), limit (int, default 20)
 
 pod_pass_rate
   params: college_name (str, optional)
+  use for: "POD pass rate", "what % pass POD", "college pass rate"
+  NOTE: for employability pass rate, use emp_pass_rate instead
 
 pod_top_passers
   params: college_name (str, optional), limit (int, default 10)
@@ -126,7 +186,7 @@ pod_never_passed
 pod_weekly_passers
   params: college_name (str, optional), limit (int, default 20)
 
---- DIFFICULTY & LANGUAGE ---
+--- POD: DIFFICULTY & LANGUAGE ---
 pod_difficulty_breakdown
   params: college_name (str, optional)
 
@@ -136,51 +196,117 @@ pod_language_breakdown
 pod_hard_solvers
   params: college_name (str, optional), limit (int, default 20)
 
---- STREAKS & CONSISTENCY ---
+--- POD: STREAKS ---
 pod_longest_streak
   params: college_name (str, optional), limit (int, default 10)
 
 pod_active_streaks
-  params: college_name (str, optional), min_streak (int, default 3 — minimum streak length to include), limit (int, default 20)
+  params: college_name (str, optional), min_streak (int, default 3), limit (int, default 20)
 
 pod_lost_streak
   params: college_name (str, optional), limit (int, default 20)
 
---- POINTS & COINS ---
+--- POD: POINTS & COINS ---
 pod_top_coins
   params: college_name (str, optional), limit (int, default 10)
 
 pod_total_points_today
   params: college_name (str, optional)
 
-pod_top_scorers — students ranked by total POD score/points earned overall
-  params: college_name (str, optional), limit (int, default 10)
-  use this for: "who has the most points", "show leaderboard", "top students by score", "highest scoring students", "who scored the most", "points leaderboard", "overall points ranking", "most points overall"
+pod_top_scorers — students ranked by total POD score
+  params: college_name (str, optional), limit (int, default 10), week_filter (bool, optional — true if user says "this week")
+  use for: "POD leaderboard", "top scorers", "who has the most points", "highest scoring students"
 
---- BADGES ---
+--- POD: BADGES ---
 pod_badge_earners
   params: college_name (str, optional), limit (int, default 20)
 
 pod_weekly_badge_earners
   params: college_name (str, optional), limit (int, default 20)
 
---- STUDENT PROFILE ---
+--- POD: STUDENT PROFILE ---
 pod_student_profile
-  params: student_name (str, required — full or partial name of the student), college_name (str, optional), date_filter (str, optional — "today" or "YYYY-MM-DD"), info_type (str, optional — "submissions", "streaks", "badges", "coins", or "all" — default "all", can also be combined like "streaks, badges"), language (str, optional — the specific programming language used e.g. "python", "java", "c", "cpp", "javascript", "sql". Only set if user mentions a specific programming language like "in python" or "using java"), week_filter (bool, optional — set true if user says "this week"), pod_type (str, optional — the POD category: "coding", "aptitude", or "verbal". Set this when user says "coding problems", "aptitude questions", "verbal questions", "in coding", "in aptitude", "in verbal")
+  params: student_name (str, required), college_name (str, optional), date_filter (str, optional — "today" or "YYYY-MM-DD"), info_type (str, optional — "submissions"/"streaks"/"badges"/"coins"/"all", default "all"), language (str, optional — e.g. "python", "java", "cpp"), week_filter (bool, optional — true if user says "this week"), pod_type (str, optional — "coding"/"aptitude"/"verbal")
+  use for: "[name]'s POD profile", "how is [name] doing" (no module specified), "[name]'s streaks/badges/submissions"
+  DEFAULT: if no module is mentioned and a student name is given, use this intent
+
+--- EMPLOYABILITY: LEADERBOARDS ---
+emp_top_scorers
+  params: college_name (str, optional), limit (int, default 10), week_filter (bool, optional — true if user says "this week")
+  use for: "employability top scorers", "employability leaderboard", "highest score in employability", "top employability scorers this week"
+
+emp_most_solved
+  params: college_name (str, optional), limit (int, default 20)
+  use for: "who solved the most employability questions", "most questions solved in employability"
+
+--- EMPLOYABILITY: PERFORMANCE STATS ---
+emp_difficulty_stats
+  params: college_name (str, optional)
+  use for: "employability difficulty breakdown", "pass rate by difficulty in employability", "easy vs hard in employability"
+
+emp_pass_rate
+  params: college_name (str, optional)
+  use for: "employability pass rate", "employability success rate", "college-wise employability performance"
+
+emp_language_stats
+  params: college_name (str, optional)
+  use for: "employability language breakdown", "which language in employability", "python vs java in employability"
+
+emp_domain_breakdown
+  params: college_name (str, optional), domain_name (str, optional — set when user asks about a specific domain e.g. "Data Structures", "Algorithms", "Mathematics")
+  use for: "employability by domain", "pass rate for [domain]", "performance in [domain]", "how are students doing in [domain]"
+  EXAMPLES: "pass rate for Data Structures" → domain_name="Data Structures"
+            "Algorithms performance" → domain_name="Algorithms"
+            "which domain has most submissions" → no domain_name (returns all)
+
+emp_subdomain_breakdown
+  params: college_name (str, optional), domain_name (str, optional), limit (int, default 20)
+  use for: "subtopic breakdown", "topic-wise employability", "weakest students in [domain]", "who struggles with [domain]"
+  NOTE: "weakest in Algorithms" → domain_name="Algorithms" (see RULE 6 above)
+
+emp_question_type_stats
+  params: college_name (str, optional)
+  use for: "employability question types", "performance by question type"
+
+emp_hardest_questions
+  params: college_name (str, optional), limit (int, default 20), difficulty (str, optional — ONLY set if user explicitly says "hard", "easy", or "medium")
+  use for: "hardest employability questions", "which questions do students fail most", "lowest pass rate questions"
+  WARNING: only set difficulty if the user explicitly states it. Do not infer or assume difficulty.
+
+--- EMPLOYABILITY: ACTIVITY & TRENDS ---
+emp_recent_activity
+  params: college_name (str, optional), limit (int, default 20), date_filter (str, optional — "today" or "YYYY-MM-DD"), days (int, optional — e.g. 7 for "last 7 days"), difficulty (str, optional), language (str, optional)
+  use for: "recent employability activity", "latest submissions", "submissions from [college] in last N days", "[difficulty] [language] submissions from [college]"
+  CRITICAL: college names like "SRM", "VIT" go into college_name — NEVER into student_name
+
+emp_daily_trend
+  params: college_name (str, optional), days (int, default 30)
+  use for: "employability trend", "submissions per day", "daily employability activity"
+
+--- EMPLOYABILITY: STUDENT PROFILE ---
+emp_user_profile
+  params: student_name (str, required), college_name (str, optional), difficulty (str, optional), language (str, optional), date_filter (str, optional)
+  use for: "[name]'s employability profile", "[name] in employability", "employability history for [name]"
+  ONLY use when user explicitly mentions "employability" + a person's name
+  DO NOT extract info_type — this intent always returns all sections
 
 --- FALLBACK ---
 unknown
-  params: (none) — use when the question is not related to POD
+  params: (none)
+  use ONLY when the question has absolutely nothing to do with POD or Employability
+  (e.g. weather, jokes, general coding questions)
+  DO NOT use unknown for multi-module queries — pick the primary intent instead
 
-Respond ONLY with valid JSON in this exact shape — no explanation, no markdown:
+════════════════════════════════════════════════════════
+OUTPUT FORMAT
+════════════════════════════════════════════════════════
+
+Respond ONLY with valid JSON — no explanation, no markdown:
 {
   "intent": "<intent_label>",
-  "params": {
-    "college_name": "...",
-    "limit": 10
-  }
+  "params": { "college_name": "...", "limit": 10 }
 }
-Only include params that are relevant to the detected intent. Omit params not mentioned by the user.
+Only include params the user explicitly mentioned. Omit everything else.
 """
 
 
@@ -229,9 +355,13 @@ async def execute_node(state: GraphState) -> dict[str, Any]:
         return {
             "data": None,
             "answer": (
-                "I can only answer questions about POD (Problem of the Day) activity. "
-                "Try asking things like: 'Who solved today's POD?', "
-                "'Show me the pass/fail summary', or 'Who has the longest streak?'"
+                "I can answer questions about **POD (Problem of the Day)** and **Employability Track** activity.\n\n"
+                "Some things you can ask:\n"
+                "- *Who solved today's POD?*\n"
+                "- *Show employability top scorers*\n"
+                "- *What's the pass rate for Data Structures?*\n"
+                "- *Show [student name]'s profile*\n\n"
+                "If you asked about both POD and Employability in one question, try splitting it into two separate questions."
             ),
         }
 
@@ -254,14 +384,17 @@ async def execute_node(state: GraphState) -> dict[str, Any]:
 # ── Node 3: format answer ─────────────────────────────────────────────────────
 
 FORMAT_SYSTEM = """You are a helpful analytics assistant for college faculty.
-You will receive a faculty question and a JSON data payload about POD (Problem of the Day) activity.
+You will receive a faculty question and a JSON data payload about student activity — either POD (Problem of the Day) or Employability Track.
 
 Rules:
 - NEVER reconstruct or redraw the data as a table — the UI already shows the full table.
-- Write 2-5 concise bullet points highlighting the key insights.
+- Write 2-5 concise bullet points highlighting the key insights from the data provided.
 - Round numbers to 2 decimal places.
-- Do NOT invent values not present in the data.
-- Refer to columns naturally — e.g. "streak_count" → "streak", "obtained_score" → "score".
+- Do NOT invent, assume, or speculate about values not present in the data payload.
+- Do NOT mention or comment on data that is missing (e.g. "no employability data was provided") — only summarise what IS in the data.
+- If the question asked about two modules but only one module's data is present, summarise only what you have without apologising for the missing part.
+- Refer to columns naturally — e.g. "streak_count" → "streak", "obtained_score" → "score", "pass_rate_percent" → "pass rate".
+- For employability data, refer to it as "Employability Track" not "POD".
 """
 
 
@@ -279,12 +412,26 @@ async def format_node(state: GraphState) -> dict[str, Any]:
         return {"answer": "No data found for that query."}
 
     data_str = _safe_json(data)
-    logger.info(f"[format] formatting {len(data)} rows")
+    intent = state.get("intent", "")
+
+    # For profile dict, log section sizes; for lists, log row count
+    if isinstance(data, dict):
+        section_info = ", ".join(f"{k}: {len(v) if isinstance(v, list) else 1} rows" for k, v in data.items())
+        logger.info(f"[format] The data is a profile dict with sections — {section_info}.")
+    else:
+        logger.info(f"[format] formatting {len(data)} rows")
+
+    # Strip the original question from the formatter — use a neutral instruction
+    # so the LLM doesn't try to address parts of the question not covered by the data
+    format_instruction = (
+        f"Summarise the following {intent.replace('_', ' ').upper()} data in 2-5 concise bullet points. "
+        f"Only describe what is in the data. Do not mention anything not present in the payload."
+    )
 
     try:
         response = await _llm.ainvoke([
             {"role": "system", "content": FORMAT_SYSTEM},
-            {"role": "user",   "content": f"Question: {state['message']}\n\nData:\n{data_str}"},
+            {"role": "user",   "content": f"{format_instruction}\n\nData:\n{data_str}"},
         ])
         return {"answer": response.content.strip()}
     except Exception as exc:

@@ -59,6 +59,22 @@ INTENT_POD_WEEKLY_BADGE_EARNERS   = "pod_weekly_badge_earners"
 INTENT_POD_STUDENT_PROFILE        = "pod_student_profile"
 INTENT_UNKNOWN                    = "unknown"
 
+
+# ── Employability Intent Labels ───────────────────────────────────────────────
+
+INTENT_EMP_TOP_SCORERS            = "emp_top_scorers"
+INTENT_EMP_DIFFICULTY_STATS       = "emp_difficulty_stats"
+INTENT_EMP_LANGUAGE_STATS         = "emp_language_stats"
+INTENT_EMP_DOMAIN_BREAKDOWN       = "emp_domain_breakdown"
+INTENT_EMP_SUBDOMAIN_BREAKDOWN    = "emp_subdomain_breakdown"
+INTENT_EMP_QUESTION_TYPE_STATS    = "emp_question_type_stats"
+INTENT_EMP_MOST_SOLVED            = "emp_most_solved"
+INTENT_EMP_RECENT_ACTIVITY        = "emp_recent_activity"
+INTENT_EMP_HARDEST_QUESTIONS      = "emp_hardest_questions"
+INTENT_EMP_DAILY_TREND            = "emp_daily_trend"
+INTENT_EMP_PASS_RATE              = "emp_pass_rate"
+INTENT_EMP_USER_PROFILE           = "emp_user_profile"
+
 ALL_INTENTS = [
     INTENT_POD_WHO_SOLVED_TODAY,
     INTENT_POD_ATTEMPT_COUNT_TODAY,
@@ -82,5 +98,18 @@ ALL_INTENTS = [
     INTENT_POD_BADGE_EARNERS,
     INTENT_POD_WEEKLY_BADGE_EARNERS,
     INTENT_POD_STUDENT_PROFILE,
+    # Employability
+    INTENT_EMP_TOP_SCORERS,
+    INTENT_EMP_DIFFICULTY_STATS,
+    INTENT_EMP_LANGUAGE_STATS,
+    INTENT_EMP_DOMAIN_BREAKDOWN,
+    INTENT_EMP_SUBDOMAIN_BREAKDOWN,
+    INTENT_EMP_QUESTION_TYPE_STATS,
+    INTENT_EMP_MOST_SOLVED,
+    INTENT_EMP_RECENT_ACTIVITY,
+    INTENT_EMP_HARDEST_QUESTIONS,
+    INTENT_EMP_DAILY_TREND,
+    INTENT_EMP_PASS_RATE,
+    INTENT_EMP_USER_PROFILE,
     INTENT_UNKNOWN,
 ]

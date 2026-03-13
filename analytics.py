@@ -453,14 +453,21 @@ def get_total_points_today(college_name: Optional[str] = None) -> list[dict]:
         return []
 
 
-def get_top_scorers(college_name: Optional[str] = None, limit: int = 10) -> list[dict]:
+def get_top_scorers(
+    college_name: Optional[str] = None,
+    limit: int = 10,
+    week_filter: Optional[bool] = None,
+) -> list[dict]:
     try:
         db = next(get_db())
         params = {"limit": limit}
         college_clause = ""
+        week_clause = ""
         if college_name:
             college_clause = "AND c.name ILIKE :college"
             params["college"] = f"%{college_name}%"
+        if week_filter:
+            week_clause = "AND ps.create_at::date >= date_trunc('week', CURRENT_DATE)"
         result = db.execute(text(f"""
             SELECT u.first_name || ' ' || u.last_name AS name, c.name AS college,
                    SUM(ps.obtained_score) AS total_score,
@@ -468,7 +475,7 @@ def get_top_scorers(college_name: Optional[str] = None, limit: int = 10) -> list
             FROM pod.pod_submission ps
             JOIN public.user u ON u.id = ps.user_id
             JOIN public.college c ON c.id = u.college_id
-            WHERE u.role = 'Student' {college_clause}
+            WHERE u.role = 'Student' {college_clause} {week_clause}
             GROUP BY u.id, u.first_name, u.last_name, c.name
             ORDER BY total_score DESC LIMIT :limit
         """), params).fetchall()
@@ -662,3 +669,547 @@ def get_student_profile(
     except Exception as e:
         logger.error(f"get_student_profile error: {e}")
         return {}
+
+# ══════════════════════════════════════════════════════════════════════════════
+# EMPLOYABILITY TRACK
+# ══════════════════════════════════════════════════════════════════════════════
+
+
+def get_emp_top_scorers(
+    college_name: Optional[str] = None,
+    limit: int = 10,
+    week_filter: Optional[bool] = None,
+) -> list[dict]:
+    """Students ranked by total obtained_score across all employability submissions."""
+    try:
+        db = next(get_db())
+        params: dict = {"limit": limit}
+        college_clause = ""
+        week_clause = ""
+        if college_name:
+            college_clause = "AND c.name ILIKE :college"
+            params["college"] = f"%{college_name}%"
+        if week_filter:
+            week_clause = "AND ets.create_at >= date_trunc('week', CURRENT_TIMESTAMP)"
+        result = db.execute(text(f"""
+            SELECT
+                u.first_name || ' ' || u.last_name AS name,
+                u.email,
+                c.name                              AS college,
+                COUNT(ets.id)                       AS total_submissions,
+                SUM(ets.obtained_score)             AS total_score,
+                COUNT(CASE WHEN ets.status = 'pass' THEN 1 END) AS total_passed
+            FROM employability_track.employability_track_submission ets
+            JOIN public.user    u ON u.id  = ets.user_id
+            JOIN public.college c ON c.id  = u.college_id
+            WHERE 1=1 {college_clause} {week_clause}
+            GROUP BY u.id, u.first_name, u.last_name, u.email, c.name
+            ORDER BY total_score DESC
+            LIMIT :limit
+        """), params).fetchall()
+        return _rows_to_dicts(result)
+    except Exception as e:
+        logger.error(f"get_emp_top_scorers error: {e}")
+        return []
+
+
+def get_emp_difficulty_stats(
+    college_name: Optional[str] = None,
+) -> list[dict]:
+    """Pass rate and submission counts grouped by difficulty (easy/medium/hard)."""
+    try:
+        db = next(get_db())
+        params: dict = {}
+        college_clause = ""
+        if college_name:
+            college_clause = "AND c.name ILIKE :college"
+            params["college"] = f"%{college_name}%"
+        result = db.execute(text(f"""
+            SELECT
+                ets.difficulty,
+                COUNT(ets.id)                                            AS total_submissions,
+                COUNT(DISTINCT ets.user_id)                              AS unique_students,
+                COUNT(CASE WHEN ets.status = 'pass' THEN 1 END)         AS passed,
+                COUNT(CASE WHEN ets.status = 'fail' THEN 1 END)         AS failed,
+                ROUND(
+                    COUNT(CASE WHEN ets.status = 'pass' THEN 1 END)*100.0
+                    / NULLIF(COUNT(ets.id), 0), 2
+                )                                                        AS pass_rate_percent
+            FROM employability_track.employability_track_submission ets
+            JOIN public.user    u ON u.id = ets.user_id
+            JOIN public.college c ON c.id = u.college_id
+            WHERE ets.difficulty IS NOT NULL {college_clause}
+            GROUP BY ets.difficulty
+            ORDER BY CASE ets.difficulty
+                WHEN 'easy'   THEN 1
+                WHEN 'medium' THEN 2
+                WHEN 'hard'   THEN 3
+                ELSE 4
+            END
+        """), params).fetchall()
+        return _rows_to_dicts(result)
+    except Exception as e:
+        logger.error(f"get_emp_difficulty_stats error: {e}")
+        return []
+
+
+def get_emp_language_stats(
+    college_name: Optional[str] = None,
+) -> list[dict]:
+    """Most-used programming languages in employability submissions with pass rates."""
+    try:
+        db = next(get_db())
+        params: dict = {}
+        college_clause = ""
+        if college_name:
+            college_clause = "AND c.name ILIKE :college"
+            params["college"] = f"%{college_name}%"
+        result = db.execute(text(f"""
+            SELECT
+                ets.language,
+                COUNT(ets.id)                                            AS total_submissions,
+                COUNT(DISTINCT ets.user_id)                              AS unique_students,
+                COUNT(CASE WHEN ets.status = 'pass' THEN 1 END)         AS passed,
+                ROUND(
+                    COUNT(CASE WHEN ets.status = 'pass' THEN 1 END)*100.0
+                    / NULLIF(COUNT(ets.id), 0), 2
+                )                                                        AS pass_rate_percent
+            FROM employability_track.employability_track_submission ets
+            JOIN public.user    u ON u.id = ets.user_id
+            JOIN public.college c ON c.id = u.college_id
+            WHERE ets.language IS NOT NULL {college_clause}
+            GROUP BY ets.language
+            ORDER BY total_submissions DESC
+        """), params).fetchall()
+        return _rows_to_dicts(result)
+    except Exception as e:
+        logger.error(f"get_emp_language_stats error: {e}")
+        return []
+
+
+def get_emp_domain_breakdown(
+    college_name: Optional[str] = None,
+    domain_name: Optional[str] = None,
+) -> list[dict]:
+    """Submission counts and pass rates grouped by domain name. Optionally filter to a specific domain."""
+    try:
+        db = next(get_db())
+        params: dict = {}
+        college_clause = ""
+        domain_clause = ""
+        if college_name:
+            college_clause = "AND c.name ILIKE :college"
+            params["college"] = f"%{college_name}%"
+        if domain_name:
+            domain_clause = "AND d.domain ILIKE :domain"
+            params["domain"] = f"%{domain_name}%"
+        result = db.execute(text(f"""
+            SELECT
+                d.domain                                                 AS domain,
+                COUNT(ets.id)                                            AS total_submissions,
+                COUNT(DISTINCT ets.user_id)                              AS unique_students,
+                COUNT(CASE WHEN ets.status = 'pass' THEN 1 END)         AS passed,
+                ROUND(
+                    COUNT(CASE WHEN ets.status = 'pass' THEN 1 END)*100.0
+                    / NULLIF(COUNT(ets.id), 0), 2
+                )                                                        AS pass_rate_percent
+            FROM employability_track.employability_track_submission ets
+            JOIN public.domains  d ON d.id  = ets.domain_id
+            JOIN public.user     u ON u.id  = ets.user_id
+            JOIN public.college  c ON c.id  = u.college_id
+            WHERE 1=1 {college_clause} {domain_clause}
+            GROUP BY d.domain
+            ORDER BY total_submissions DESC
+        """), params).fetchall()
+        return _rows_to_dicts(result)
+    except Exception as e:
+        logger.error(f"get_emp_domain_breakdown error: {e}")
+        return []
+
+
+def get_emp_subdomain_breakdown(
+    college_name: Optional[str] = None,
+    domain_name: Optional[str] = None,
+    limit: int = 20,
+) -> list[dict]:
+    """Submission counts and pass rates grouped by sub-domain topic name."""
+    try:
+        db = next(get_db())
+        params: dict = {"limit": limit}
+        college_clause = ""
+        domain_clause = ""
+        if college_name:
+            college_clause = "AND c.name ILIKE :college"
+            params["college"] = f"%{college_name}%"
+        if domain_name:
+            domain_clause = "AND d.domain ILIKE :domain"
+            params["domain"] = f"%{domain_name}%"
+        result = db.execute(text(f"""
+            SELECT
+                d.domain                                                 AS domain,
+                qsd.name                                                 AS sub_domain,
+                COUNT(ets.id)                                            AS total_submissions,
+                COUNT(DISTINCT ets.user_id)                              AS unique_students,
+                COUNT(CASE WHEN ets.status = 'pass' THEN 1 END)         AS passed,
+                ROUND(
+                    COUNT(CASE WHEN ets.status = 'pass' THEN 1 END)*100.0
+                    / NULLIF(COUNT(ets.id), 0), 2
+                )                                                        AS pass_rate_percent
+            FROM employability_track.employability_track_submission ets
+            JOIN public.domains           d   ON d.id   = ets.domain_id
+            JOIN public.question_sub_domain qsd ON qsd.id = ets.sub_domain_id
+            JOIN public.user               u   ON u.id   = ets.user_id
+            JOIN public.college            c   ON c.id   = u.college_id
+            WHERE 1=1 {college_clause} {domain_clause}
+            GROUP BY d.domain, qsd.name
+            ORDER BY total_submissions DESC
+            LIMIT :limit
+        """), params).fetchall()
+        return _rows_to_dicts(result)
+    except Exception as e:
+        logger.error(f"get_emp_subdomain_breakdown error: {e}")
+        return []
+
+
+def get_emp_question_type_stats(
+    college_name: Optional[str] = None,
+) -> list[dict]:
+    """Submission counts and pass rates by question type name (via public.test_type join)."""
+    try:
+        db = next(get_db())
+        params: dict = {}
+        college_clause = ""
+        if college_name:
+            college_clause = "AND c.name ILIKE :college"
+            params["college"] = f"%{college_name}%"
+        result = db.execute(text(f"""
+            SELECT
+                tt.name                                                  AS question_type,
+                COUNT(ets.id)                                            AS total_submissions,
+                COUNT(DISTINCT ets.user_id)                              AS unique_students,
+                COUNT(CASE WHEN ets.status = 'pass' THEN 1 END)         AS passed,
+                ROUND(
+                    COUNT(CASE WHEN ets.status = 'pass' THEN 1 END)*100.0
+                    / NULLIF(COUNT(ets.id), 0), 2
+                )                                                        AS pass_rate_percent,
+                ROUND(AVG(ets.obtained_score), 2)                       AS avg_score
+            FROM employability_track.employability_track_submission ets
+            JOIN employability_track.employability_track_question etq
+                ON etq.question_id = ets.question_id
+            JOIN public.test_type tt ON tt.id = etq.test_type_id
+            JOIN public.user       u  ON u.id  = ets.user_id
+            JOIN public.college    c  ON c.id  = u.college_id
+            WHERE 1=1 {college_clause}
+            GROUP BY tt.name
+            ORDER BY total_submissions DESC
+        """), params).fetchall()
+        return _rows_to_dicts(result)
+    except Exception as e:
+        logger.error(f"get_emp_question_type_stats error: {e}")
+        return []
+
+
+def get_emp_most_solved(
+    college_name: Optional[str] = None,
+    limit: int = 20,
+) -> list[dict]:
+    """Students with the most questions marked 'solved' in question_status."""
+    try:
+        db = next(get_db())
+        params: dict = {"limit": limit}
+        college_clause = ""
+        if college_name:
+            college_clause = "AND c.name ILIKE :college"
+            params["college"] = f"%{college_name}%"
+        result = db.execute(text(f"""
+            SELECT
+                u.first_name || ' ' || u.last_name  AS name,
+                u.email,
+                c.name                              AS college,
+                COUNT(CASE WHEN qs.status = 'solved'    THEN 1 END) AS solved_count,
+                COUNT(CASE WHEN qs.status = 'attempted' THEN 1 END) AS attempted_count,
+                COUNT(qs.question_id)               AS total_questions
+            FROM employability_track.question_status qs
+            JOIN public.user    u ON u.id = qs.user_id
+            JOIN public.college c ON c.id = u.college_id
+            WHERE 1=1 {college_clause}
+            GROUP BY u.id, u.first_name, u.last_name, u.email, c.name
+            ORDER BY solved_count DESC
+            LIMIT :limit
+        """), params).fetchall()
+        return _rows_to_dicts(result)
+    except Exception as e:
+        logger.error(f"get_emp_most_solved error: {e}")
+        return []
+
+
+def get_emp_recent_activity(
+    college_name: Optional[str] = None,
+    limit: int = 20,
+    date_filter: Optional[str] = None,
+    days: Optional[int] = None,
+    difficulty: Optional[str] = None,
+    language: Optional[str] = None,
+) -> list[dict]:
+    """Latest employability submissions with optional filters for college, difficulty, language, date/days."""
+    try:
+        db = next(get_db())
+        params: dict = {"limit": limit}
+        college_clause = ""
+        date_clause = ""
+        difficulty_clause = ""
+        language_clause = ""
+        if college_name:
+            college_clause = "AND c.name ILIKE :college"
+            params["college"] = f"%{college_name}%"
+        if date_filter == "today":
+            date_clause = "AND ets.create_at::date = CURRENT_DATE"
+        elif date_filter:
+            date_clause = f"AND ets.create_at::date = '{date_filter}'"
+        elif days:
+            date_clause = "AND ets.create_at >= NOW() - (:days * INTERVAL '1 day')"
+            params["days"] = days
+        if difficulty:
+            difficulty_clause = "AND ets.difficulty ILIKE :difficulty"
+            params["difficulty"] = difficulty
+        if language:
+            language_clause = "AND ets.language ILIKE :language"
+            params["language"] = f"%{language}%"
+        result = db.execute(text(f"""
+            SELECT
+                u.first_name || ' ' || u.last_name  AS name,
+                u.email,
+                c.name          AS college,
+                d.domain        AS domain,
+                qsd.name        AS sub_domain,
+                ets.difficulty,
+                ets.language,
+                ets.status,
+                ets.obtained_score,
+                ets.create_at
+            FROM employability_track.employability_track_submission ets
+            JOIN public.user               u   ON u.id   = ets.user_id
+            JOIN public.college            c   ON c.id   = u.college_id
+            LEFT JOIN public.domains       d   ON d.id   = ets.domain_id
+            LEFT JOIN public.question_sub_domain qsd ON qsd.id = ets.sub_domain_id
+            WHERE 1=1 {college_clause} {date_clause} {difficulty_clause} {language_clause}
+            ORDER BY ets.create_at DESC
+            LIMIT :limit
+        """), params).fetchall()
+        return _rows_to_dicts(result)
+    except Exception as e:
+        logger.error(f"get_emp_recent_activity error: {e}")
+        return []
+
+
+def get_emp_hardest_questions(
+    college_name: Optional[str] = None,
+    limit: int = 20,
+    difficulty: Optional[str] = None,
+) -> list[dict]:
+    """Questions with the lowest pass rate — hardest in the employability track."""
+    try:
+        db = next(get_db())
+        params: dict = {"limit": limit}
+        college_clause = ""
+        difficulty_clause = ""
+        if college_name:
+            college_clause = "AND c.name ILIKE :college"
+            params["college"] = f"%{college_name}%"
+        if difficulty:
+            difficulty_clause = "AND ets.difficulty ILIKE :difficulty"
+            params["difficulty"] = difficulty
+        result = db.execute(text(f"""
+            SELECT
+                ets.question_id,
+                MAX(ets.title)                                           AS title,
+                MAX(ets.difficulty)                                      AS difficulty,
+                MAX(d.domain)                                            AS domain,
+                MAX(qsd.name)                                            AS sub_domain,
+                COUNT(ets.id)                                            AS total_attempts,
+                COUNT(DISTINCT ets.user_id)                              AS unique_students,
+                COUNT(CASE WHEN ets.status = 'pass' THEN 1 END)         AS passed,
+                ROUND(
+                    COUNT(CASE WHEN ets.status = 'pass' THEN 1 END)*100.0
+                    / NULLIF(COUNT(ets.id), 0), 2
+                )                                                        AS pass_rate_percent
+            FROM employability_track.employability_track_submission ets
+            JOIN public.user               u   ON u.id  = ets.user_id
+            JOIN public.college            c   ON c.id  = u.college_id
+            LEFT JOIN public.domains       d   ON d.id  = ets.domain_id
+            LEFT JOIN public.question_sub_domain qsd ON qsd.id = ets.sub_domain_id
+            WHERE 1=1 {college_clause} {difficulty_clause}
+            GROUP BY ets.question_id
+            HAVING COUNT(ets.id) >= 5
+            ORDER BY pass_rate_percent ASC, total_attempts DESC
+            LIMIT :limit
+        """), params).fetchall()
+        return _rows_to_dicts(result)
+    except Exception as e:
+        logger.error(f"get_emp_hardest_questions error: {e}")
+        return []
+
+
+def get_emp_daily_trend(
+    college_name: Optional[str] = None,
+    days: int = 30,
+) -> list[dict]:
+    """Submission count per day over the last N days."""
+    try:
+        db = next(get_db())
+        params: dict = {"since": date.today() - timedelta(days=days)}
+        college_clause = ""
+        if college_name:
+            college_clause = "AND c.name ILIKE :college"
+            params["college"] = f"%{college_name}%"
+        result = db.execute(text(f"""
+            SELECT
+                ets.create_at::date                                      AS submission_date,
+                COUNT(ets.id)                                            AS total_submissions,
+                COUNT(DISTINCT ets.user_id)                              AS unique_students,
+                COUNT(CASE WHEN ets.status = 'pass' THEN 1 END)         AS passed,
+                ROUND(
+                    COUNT(CASE WHEN ets.status = 'pass' THEN 1 END)*100.0
+                    / NULLIF(COUNT(ets.id), 0), 2
+                )                                                        AS pass_rate_percent
+            FROM employability_track.employability_track_submission ets
+            JOIN public.user    u ON u.id = ets.user_id
+            JOIN public.college c ON c.id = u.college_id
+            WHERE ets.create_at::date >= :since {college_clause}
+            GROUP BY ets.create_at::date
+            ORDER BY submission_date DESC
+        """), params).fetchall()
+        return _rows_to_dicts(result)
+    except Exception as e:
+        logger.error(f"get_emp_daily_trend error: {e}")
+        return []
+
+
+def get_emp_pass_rate(
+    college_name: Optional[str] = None,
+) -> list[dict]:
+    """Overall employability pass rate per college."""
+    try:
+        db = next(get_db())
+        params: dict = {}
+        college_clause = ""
+        if college_name:
+            college_clause = "AND c.name ILIKE :college"
+            params["college"] = f"%{college_name}%"
+        result = db.execute(text(f"""
+            SELECT
+                c.name                                                   AS college,
+                COUNT(ets.id)                                            AS total_submissions,
+                COUNT(DISTINCT ets.user_id)                              AS unique_students,
+                COUNT(CASE WHEN ets.status = 'pass' THEN 1 END)         AS total_passed,
+                ROUND(
+                    COUNT(CASE WHEN ets.status = 'pass' THEN 1 END)*100.0
+                    / NULLIF(COUNT(ets.id), 0), 2
+                )                                                        AS pass_rate_percent
+            FROM employability_track.employability_track_submission ets
+            JOIN public.user    u ON u.id = ets.user_id
+            JOIN public.college c ON c.id = u.college_id
+            WHERE 1=1 {college_clause}
+            GROUP BY c.name
+            ORDER BY pass_rate_percent DESC
+        """), params).fetchall()
+        return _rows_to_dicts(result)
+    except Exception as e:
+        logger.error(f"get_emp_pass_rate error: {e}")
+        return []
+
+
+def get_emp_user_profile(
+    student_name: str,
+    college_name: Optional[str] = None,
+    difficulty: Optional[str] = None,
+    language: Optional[str] = None,
+    date_filter: Optional[str] = None,
+) -> dict:
+    """Full employability profile for a student — summary, submissions, question status breakdown."""
+    try:
+        db = next(get_db())
+        base_params: dict = {"name": f"%{student_name}%"}
+        college_clause = ""
+        if college_name:
+            college_clause = "AND c.name ILIKE :college"
+            base_params["college"] = f"%{college_name}%"
+
+        # ── Section 1: Submission history ──────────────────────────────────
+        sub_params = dict(base_params)
+        filters = ""
+        if difficulty:
+            filters += " AND ets.difficulty ILIKE :difficulty"
+            sub_params["difficulty"] = difficulty
+        if language:
+            filters += " AND ets.language ILIKE :language"
+            sub_params["language"] = f"%{language}%"
+        if date_filter == "today":
+            filters += " AND ets.create_at::date = CURRENT_DATE"
+        elif date_filter:
+            filters += f" AND ets.create_at::date = '{date_filter}'"
+
+        submissions = db.execute(text(f"""
+            SELECT
+                d.domain        AS domain,
+                qsd.name        AS sub_domain,
+                ets.title,
+                ets.difficulty,
+                ets.language,
+                ets.status,
+                ets.obtained_score,
+                ets.points      AS max_points,
+                ets.create_at
+            FROM employability_track.employability_track_submission ets
+            JOIN public.user               u   ON u.id   = ets.user_id
+            JOIN public.college            c   ON c.id   = u.college_id
+            LEFT JOIN public.domains       d   ON d.id   = ets.domain_id
+            LEFT JOIN public.question_sub_domain qsd ON qsd.id = ets.sub_domain_id
+            WHERE (u.first_name || ' ' || u.last_name) ILIKE :name
+              {college_clause} {filters}
+            ORDER BY ets.create_at DESC
+            LIMIT 50
+        """), sub_params).fetchall()
+
+        # ── Section 2: Performance summary ─────────────────────────────────
+        summary = db.execute(text(f"""
+            SELECT
+                u.first_name || ' ' || u.last_name  AS name,
+                c.name                              AS college,
+                COUNT(ets.id)                       AS total_submissions,
+                SUM(ets.obtained_score)             AS total_score,
+                COUNT(CASE WHEN ets.status = 'pass' THEN 1 END) AS total_passed,
+                COUNT(CASE WHEN ets.status = 'fail' THEN 1 END) AS total_failed,
+                ROUND(
+                    COUNT(CASE WHEN ets.status = 'pass' THEN 1 END)*100.0
+                    / NULLIF(COUNT(ets.id), 0), 2
+                )                                   AS pass_rate_percent,
+                COUNT(DISTINCT ets.language)        AS languages_used
+            FROM employability_track.employability_track_submission ets
+            JOIN public.user    u ON u.id = ets.user_id
+            JOIN public.college c ON c.id = u.college_id
+            WHERE (u.first_name || ' ' || u.last_name) ILIKE :name {college_clause}
+            GROUP BY u.id, u.first_name, u.last_name, c.name
+        """), base_params).fetchall()
+
+        # ── Section 3: Question status breakdown ───────────────────────────
+        question_status = db.execute(text(f"""
+            SELECT
+                qs.status,
+                COUNT(qs.question_id) AS question_count
+            FROM employability_track.question_status qs
+            JOIN public.user    u ON u.id = qs.user_id
+            JOIN public.college c ON c.id = u.college_id
+            WHERE (u.first_name || ' ' || u.last_name) ILIKE :name {college_clause}
+            GROUP BY qs.status
+        """), base_params).fetchall()
+
+        return {
+            "summary":         _rows_to_dicts(summary),
+            "submissions":     _rows_to_dicts(submissions),
+            "question_status": _rows_to_dicts(question_status),
+        }
+
+    except Exception as e:
+        logger.error(f"get_emp_user_profile error: {e}")
+        return {"summary": [], "submissions": [], "question_status": []}
