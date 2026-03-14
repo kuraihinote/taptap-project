@@ -1213,3 +1213,418 @@ def get_emp_user_profile(
     except Exception as e:
         logger.error(f"get_emp_user_profile error: {e}")
         return {"summary": [], "submissions": [], "question_status": []}
+
+# ══════════════════════════════════════════════════════════════════════════════
+# ASSESS MODULE
+# ══════════════════════════════════════════════════════════════════════════════
+
+# Stop-words to strip from assessment title searches so "DSA test" → just "DSA"
+_ASSESS_STOP_WORDS = {"test", "assessment", "the", "a", "an", "for", "in", "of"}
+
+
+def _assess_title_clause(assessment_title: Optional[str], params: dict) -> str:
+    """
+    Build a WHERE clause that matches any meaningful keyword in assessment_title
+    against the assessment_title column using ILIKE.
+    e.g. "DSA test" → AND (a.assessment_title ILIKE '%DSA%')
+         "angular"  → AND (a.assessment_title ILIKE '%angular%')
+         "c assessment" → AND (a.assessment_title ILIKE '%c%')
+    Returns empty string if assessment_title is None.
+    """
+    if not assessment_title:
+        return ""
+    keywords = [
+        w for w in assessment_title.split()
+        if w.lower() not in _ASSESS_STOP_WORDS
+    ]
+    if not keywords:
+        # fallback — use full string if all words were stop-words
+        params["assess_title_0"] = f"%{assessment_title}%"
+        return "AND a.assessment_title ILIKE :assess_title_0"
+    clauses = []
+    for i, kw in enumerate(keywords):
+        key = f"assess_kw_{i}"
+        params[key] = f"%{kw}%"
+        clauses.append(f"a.assessment_title ILIKE :{key}")
+    return "AND (" + " OR ".join(clauses) + ")"
+
+
+def get_assess_list(assessment_title: Optional[str] = None) -> list[dict]:
+    """List all assessments with title, status, open/close time, shortlisted count, submitted count."""
+    try:
+        db = next(get_db())
+        params: dict = {}
+        title_clause = _assess_title_clause(assessment_title, params)
+        result = db.execute(text(f"""
+            SELECT
+                a.id::text                               AS id,
+                a.assessment_title                       AS title,
+                a.status,
+                a.assessment_type,
+                a.open_time,
+                a.close_time,
+                a.round_number,
+                jsonb_array_length(a.shortlisted_students)::int   AS shortlisted_count,
+                jsonb_array_length(a.assessment_submitted_students)::int AS submitted_count,
+                a.created_at
+            FROM gest.assessment_shortlist a
+            WHERE 1=1 {title_clause}
+            ORDER BY a.created_at DESC
+        """), params).fetchall()
+        return _rows_to_dicts(result)
+    except Exception as e:
+        logger.error(f"get_assess_list error: {e}")
+        return []
+
+
+def get_assess_overview(assessment_title: Optional[str] = None) -> list[dict]:
+    """Overview of a specific assessment — shortlisted, submitted, pass rate, avg score."""
+    try:
+        db = next(get_db())
+        params: dict = {}
+        title_clause = _assess_title_clause(assessment_title, params)
+        result = db.execute(text(f"""
+            SELECT
+                a.assessment_title                          AS title,
+                a.status,
+                a.open_time,
+                a.close_time,
+                jsonb_array_length(a.shortlisted_students)::int      AS shortlisted_count,
+                jsonb_array_length(a.assessment_submitted_students)::int AS submitted_count,
+                COUNT(DISTINCT s.user_id)                   AS students_with_submissions,
+                COUNT(s.id)                                 AS total_question_submissions,
+                COUNT(CASE WHEN s.status = 'pass' THEN 1 END) AS total_passed,
+                ROUND(
+                    COUNT(CASE WHEN s.status = 'pass' THEN 1 END)*100.0
+                    / NULLIF(COUNT(s.id), 0), 2
+                )                                           AS pass_rate_percent,
+                ROUND(AVG(s.obtained_score), 2)             AS avg_score
+            FROM gest.assessment_shortlist a
+            LEFT JOIN gest.assessment_final_attempt_submission s
+                ON s.assessment_id = a.id::text
+            WHERE 1=1 {title_clause}
+            GROUP BY a.id, a.assessment_title, a.status, a.open_time,
+                     a.close_time, a.shortlisted_students, a.assessment_submitted_students
+            ORDER BY a.created_at DESC
+        """), params).fetchall()
+        return _rows_to_dicts(result)
+    except Exception as e:
+        logger.error(f"get_assess_overview error: {e}")
+        return []
+
+
+def get_assess_student_result(
+    student_name: str,
+    assessment_title: Optional[str] = None,
+) -> list[dict]:
+    """A student's per-question results across all or a specific assessment."""
+    try:
+        db = next(get_db())
+        params: dict = {"name": f"%{student_name}%"}
+        title_clause = _assess_title_clause(assessment_title, params)
+        result = db.execute(text(f"""
+            SELECT
+                u.first_name || ' ' || u.last_name      AS student_name,
+                a.assessment_title                      AS assessment,
+                s.question_type,
+                s.skill,
+                s.difficulty,
+                s.hackathon_sub_domain                  AS sub_domain,
+                s.language,
+                s.status,
+                s.obtained_score,
+                s.question_score,
+                s.submission_time
+            FROM gest.assessment_final_attempt_submission s
+            JOIN public.user u ON u.id::text = s.user_id
+            JOIN gest.assessment_shortlist a ON a.id::text = s.assessment_id
+            WHERE (u.first_name || ' ' || u.last_name) ILIKE :name
+              {title_clause}
+            ORDER BY s.submission_time DESC
+            LIMIT 50
+        """), params).fetchall()
+        return _rows_to_dicts(result)
+    except Exception as e:
+        logger.error(f"get_assess_student_result error: {e}")
+        return []
+
+
+def get_assess_top_scorers(
+    assessment_title: Optional[str] = None,
+    limit: int = 10,
+) -> list[dict]:
+    """Top N students by total score for a given assessment."""
+    try:
+        db = next(get_db())
+        params: dict = {"limit": limit}
+        title_clause = _assess_title_clause(assessment_title, params)
+
+        # Primary: assessment_final_attempt_submission joined via assessment_id
+        result = db.execute(text(f"""
+            SELECT
+                u.first_name || ' ' || u.last_name      AS name,
+                u.email,
+                a.assessment_title                      AS assessment,
+                SUM(s.obtained_score)                   AS total_score,
+                COUNT(CASE WHEN s.status = 'pass' THEN 1 END) AS questions_passed,
+                COUNT(s.id)                             AS questions_attempted
+            FROM gest.assessment_final_attempt_submission s
+            JOIN public.user u ON u.id = s.user_id
+            JOIN gest.assessment_shortlist a ON a.id::text = s.assessment_id
+            WHERE 1=1 {title_clause}
+            GROUP BY u.id, u.first_name, u.last_name, u.email, a.assessment_title
+            ORDER BY total_score DESC
+            LIMIT :limit
+        """), params).fetchall()
+
+        # Fallback: assessment_test_submission — join via round_id = hackathon_id
+        if not result:
+            result = db.execute(text(f"""
+                SELECT
+                    u.first_name || ' ' || u.last_name  AS name,
+                    u.email,
+                    a.assessment_title                  AS assessment,
+                    SUM(s.score)                        AS total_score,
+                    COUNT(CASE WHEN s.status = 'pass' THEN 1 END) AS questions_passed,
+                    COUNT(s.id)                         AS questions_attempted
+                FROM gest.assessment_test_submission s
+                JOIN public.user u ON u.id::text = s.user_id
+                JOIN gest.assessment_shortlist a ON a.hackathon_id = s.round_id
+                WHERE 1=1 {title_clause}
+                GROUP BY u.id, u.first_name, u.last_name, u.email, a.assessment_title
+                ORDER BY total_score DESC
+                LIMIT :limit
+            """), params).fetchall()
+
+        return _rows_to_dicts(result)
+    except Exception as e:
+        logger.error(f"get_assess_top_scorers error: {e}")
+        return []
+
+
+def get_assess_pass_rate(
+    assessment_title: Optional[str] = None,
+) -> list[dict]:
+    """Pass rate per assessment, optionally filtered by title."""
+    try:
+        db = next(get_db())
+        params: dict = {}
+        title_clause = _assess_title_clause(assessment_title, params)
+        result = db.execute(text(f"""
+            SELECT
+                a.assessment_title                      AS assessment,
+                a.status,
+                COUNT(s.id)                             AS total_submissions,
+                COUNT(CASE WHEN s.status = 'pass' THEN 1 END) AS passed,
+                COUNT(CASE WHEN s.status = 'fail' THEN 1 END) AS failed,
+                ROUND(
+                    COUNT(CASE WHEN s.status = 'pass' THEN 1 END)*100.0
+                    / NULLIF(COUNT(s.id), 0), 2
+                )                                       AS pass_rate_percent,
+                ROUND(AVG(s.obtained_score), 2)         AS avg_score
+            FROM gest.assessment_shortlist a
+            LEFT JOIN gest.assessment_final_attempt_submission s
+                ON s.assessment_id = a.id::text
+            WHERE 1=1 {title_clause}
+            GROUP BY a.id, a.assessment_title, a.status
+            ORDER BY pass_rate_percent DESC
+        """), params).fetchall()
+        return _rows_to_dicts(result)
+    except Exception as e:
+        logger.error(f"get_assess_pass_rate error: {e}")
+        return []
+
+
+def get_assess_skill_breakdown(
+    assessment_title: Optional[str] = None,
+) -> list[dict]:
+    """Pass rate grouped by skill/subdomain for an assessment."""
+    try:
+        db = next(get_db())
+        params: dict = {}
+        title_clause = _assess_title_clause(assessment_title, params)
+        result = db.execute(text(f"""
+            SELECT
+                a.assessment_title                      AS assessment,
+                s.skill,
+                COUNT(s.id)                             AS total_submissions,
+                COUNT(DISTINCT s.user_id)               AS unique_students,
+                COUNT(CASE WHEN s.status = 'pass' THEN 1 END) AS passed,
+                ROUND(
+                    COUNT(CASE WHEN s.status = 'pass' THEN 1 END)*100.0
+                    / NULLIF(COUNT(s.id), 0), 2
+                )                                       AS pass_rate_percent,
+                ROUND(AVG(s.obtained_score), 2)         AS avg_score
+            FROM gest.assessment_final_attempt_submission s
+            JOIN gest.assessment_shortlist a ON a.id::text = s.assessment_id
+            WHERE s.skill IS NOT NULL {title_clause}
+            GROUP BY a.assessment_title, s.skill
+            ORDER BY total_submissions DESC
+        """), params).fetchall()
+        return _rows_to_dicts(result)
+    except Exception as e:
+        logger.error(f"get_assess_skill_breakdown error: {e}")
+        return []
+
+
+def get_assess_difficulty_breakdown(
+    assessment_title: Optional[str] = None,
+) -> list[dict]:
+    """Pass rate split by difficulty (easy/medium/hard) for an assessment."""
+    try:
+        db = next(get_db())
+        params: dict = {}
+        title_clause = _assess_title_clause(assessment_title, params)
+        result = db.execute(text(f"""
+            SELECT
+                a.assessment_title                      AS assessment,
+                s.difficulty,
+                COUNT(s.id)                             AS total_submissions,
+                COUNT(DISTINCT s.user_id)               AS unique_students,
+                COUNT(CASE WHEN s.status = 'pass' THEN 1 END) AS passed,
+                ROUND(
+                    COUNT(CASE WHEN s.status = 'pass' THEN 1 END)*100.0
+                    / NULLIF(COUNT(s.id), 0), 2
+                )                                       AS pass_rate_percent
+            FROM gest.assessment_final_attempt_submission s
+            JOIN gest.assessment_shortlist a ON a.id::text = s.assessment_id
+            WHERE s.difficulty IS NOT NULL {title_clause}
+            GROUP BY a.assessment_title, s.difficulty
+            ORDER BY a.assessment_title,
+                     CASE s.difficulty WHEN 'easy' THEN 1 WHEN 'medium' THEN 2 WHEN 'hard' THEN 3 ELSE 4 END
+        """), params).fetchall()
+
+        # fallback using assessment_test_submission
+        if not result:
+            result = db.execute(text(f"""
+                SELECT
+                    a.assessment_title                      AS assessment,
+                    'all' AS difficulty,
+                    COUNT(s.id)                             AS total_submissions,
+                    COUNT(DISTINCT s.user_id)               AS unique_students,
+                    COUNT(CASE WHEN s.status = 'pass' THEN 1 END) AS passed,
+                    ROUND(
+                        COUNT(CASE WHEN s.status = 'pass' THEN 1 END)*100.0
+                        / NULLIF(COUNT(s.id), 0), 2
+                    )                                       AS pass_rate_percent
+                FROM gest.assessment_test_submission s
+                JOIN public.user u ON u.id::text = s.user_id
+                JOIN gest.assessment_shortlist a
+                    ON a.hackathon_id = s.round_id
+                WHERE 1=1 {title_clause}
+                GROUP BY a.assessment_title
+            """), params).fetchall()
+
+        return _rows_to_dicts(result)
+    except Exception as e:
+        logger.error(f"get_assess_difficulty_breakdown error: {e}")
+        return []
+
+
+def get_assess_completion_rate(
+    assessment_title: Optional[str] = None,
+) -> list[dict]:
+    """How many shortlisted students completed vs started vs didn't attempt."""
+    try:
+        db = next(get_db())
+        params: dict = {}
+        title_clause = _assess_title_clause(assessment_title, params)
+        result = db.execute(text(f"""
+            SELECT
+                a.assessment_title                              AS assessment,
+                a.status,
+                jsonb_array_length(a.shortlisted_students)::int              AS shortlisted_count,
+                jsonb_array_length(a.assessment_submitted_students)::int AS submitted_count,
+                COUNT(DISTINCT CASE WHEN r.status = 'completed' THEN r.user_id END) AS completed,
+                COUNT(DISTINCT CASE WHEN r.status = 'started'   THEN r.user_id END) AS in_progress,
+                ROUND(
+                    jsonb_array_length(a.assessment_submitted_students)::int*100.0
+                    / NULLIF(jsonb_array_length(a.shortlisted_students)::int, 0), 2
+                )                                               AS completion_rate_percent
+            FROM gest.assessment_shortlist a
+            LEFT JOIN gest.assessment_round_attempt_history r
+                ON r.assessment_id = a.id
+            WHERE 1=1 {title_clause}
+            GROUP BY a.id, a.assessment_title, a.status,
+                     a.shortlisted_students, a.assessment_submitted_students
+            ORDER BY a.created_at DESC
+        """), params).fetchall()
+        return _rows_to_dicts(result)
+    except Exception as e:
+        logger.error(f"get_assess_completion_rate error: {e}")
+        return []
+
+
+def get_assess_recent(limit: int = 10) -> list[dict]:
+    """Most recently created or active assessments."""
+    try:
+        db = next(get_db())
+        result = db.execute(text("""
+            SELECT
+                a.assessment_title                          AS title,
+                a.status,
+                a.assessment_type,
+                a.open_time,
+                a.close_time,
+                jsonb_array_length(a.shortlisted_students)::int      AS shortlisted_count,
+                jsonb_array_length(a.assessment_submitted_students)::int AS submitted_count,
+                a.created_at
+            FROM gest.assessment_shortlist a
+            ORDER BY a.created_at DESC
+            LIMIT :limit
+        """), {"limit": limit}).fetchall()
+        return _rows_to_dicts(result)
+    except Exception as e:
+        logger.error(f"get_assess_recent error: {e}")
+        return []
+
+
+def get_assess_student_attempts(
+    student_name: str,
+) -> list[dict]:
+    """Attempt history for a student across all assessments — status, time taken, score."""
+    try:
+        db = next(get_db())
+        result = db.execute(text("""
+            SELECT
+                u.first_name || ' ' || u.last_name      AS student_name,
+                a.assessment_title                      AS assessment,
+                r.status,
+                r.started_at,
+                r.submitted_at,
+                ROUND(
+                    EXTRACT(EPOCH FROM (r.submitted_at - r.started_at)) / 60.0, 1
+                )                                       AS duration_minutes,
+                SUM(s.obtained_score)                   AS total_score
+            FROM gest.assessment_round_attempt_history r
+            JOIN public.user u ON u.id::text = r.user_id
+            JOIN gest.assessment_shortlist a ON a.id = r.assessment_id
+            LEFT JOIN gest.assessment_final_attempt_submission s
+                ON s.user_id = r.user_id AND s.assessment_id = a.id::text
+            WHERE (u.first_name || ' ' || u.last_name) ILIKE :name
+            GROUP BY u.id, u.first_name, u.last_name,
+                     a.assessment_title, r.status, r.started_at, r.submitted_at
+            ORDER BY r.started_at DESC
+        """), {"name": f"%{student_name}%"}).fetchall()
+
+        # fallback — try assessment_test_submission if no round attempt history
+        if not result:
+            result = db.execute(text("""
+                SELECT
+                    u.first_name || ' ' || u.last_name  AS student_name,
+                    'assessment_test_submission'         AS assessment,
+                    s.status,
+                    s.start_time                        AS started_at,
+                    s.end_time                          AS submitted_at,
+                    s.time_taken,
+                    s.score                             AS total_score
+                FROM gest.assessment_test_submission s
+                JOIN public.user u ON u.id::text = s.user_id
+                WHERE (u.first_name || ' ' || u.last_name) ILIKE :name
+                ORDER BY s.start_time DESC
+            """), {"name": f"%{student_name}%"}).fetchall()
+
+        return _rows_to_dicts(result)
+    except Exception as e:
+        logger.error(f"get_assess_student_attempts error: {e}")
+        return []

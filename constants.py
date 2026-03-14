@@ -75,6 +75,21 @@ INTENT_EMP_DAILY_TREND            = "emp_daily_trend"
 INTENT_EMP_PASS_RATE              = "emp_pass_rate"
 INTENT_EMP_USER_PROFILE           = "emp_user_profile"
 
+
+# ── Assess Intent Labels ──────────────────────────────────────────────────────
+
+INTENT_ASSESS_LIST                = "assess_list"
+INTENT_ASSESS_OVERVIEW            = "assess_overview"
+INTENT_ASSESS_STUDENT_RESULT      = "assess_student_result"
+INTENT_ASSESS_TOP_SCORERS         = "assess_top_scorers"
+INTENT_ASSESS_PASS_RATE           = "assess_pass_rate"
+INTENT_ASSESS_SKILL_BREAKDOWN     = "assess_skill_breakdown"
+INTENT_ASSESS_DIFFICULTY_BREAKDOWN= "assess_difficulty_breakdown"
+INTENT_ASSESS_COMPLETION_RATE     = "assess_completion_rate"
+INTENT_ASSESS_RECENT              = "assess_recent"
+INTENT_ASSESS_STUDENT_ATTEMPTS    = "assess_student_attempts"
+
+
 ALL_INTENTS = [
     INTENT_POD_WHO_SOLVED_TODAY,
     INTENT_POD_ATTEMPT_COUNT_TODAY,
@@ -111,5 +126,16 @@ ALL_INTENTS = [
     INTENT_EMP_DAILY_TREND,
     INTENT_EMP_PASS_RATE,
     INTENT_EMP_USER_PROFILE,
+    # Assess
+    INTENT_ASSESS_LIST,
+    INTENT_ASSESS_OVERVIEW,
+    INTENT_ASSESS_STUDENT_RESULT,
+    INTENT_ASSESS_TOP_SCORERS,
+    INTENT_ASSESS_PASS_RATE,
+    INTENT_ASSESS_SKILL_BREAKDOWN,
+    INTENT_ASSESS_DIFFICULTY_BREAKDOWN,
+    INTENT_ASSESS_COMPLETION_RATE,
+    INTENT_ASSESS_RECENT,
+    INTENT_ASSESS_STUDENT_ATTEMPTS,
     INTENT_UNKNOWN,
 ]

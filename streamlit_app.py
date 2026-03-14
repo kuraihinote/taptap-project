@@ -76,6 +76,25 @@ def _render_chart(df: pd.DataFrame, intent: str) -> None:
             counts = df.groupby("name").size().sort_values(ascending=False).head(20)
             st.bar_chart(counts)
 
+        # ── Assess charts ─────────────────────────────────────────────────
+        elif intent == "assess_top_scorers" and "name" in df.columns and "total_score" in df.columns:
+            st.bar_chart(df.set_index("name")["total_score"])
+
+        elif intent == "assess_pass_rate" and "assessment" in df.columns and "pass_rate_percent" in df.columns:
+            st.bar_chart(df.set_index("assessment")["pass_rate_percent"])
+
+        elif intent == "assess_skill_breakdown" and "skill" in df.columns and "pass_rate_percent" in df.columns:
+            st.bar_chart(df.set_index("skill")["pass_rate_percent"])
+
+        elif intent == "assess_difficulty_breakdown" and "difficulty" in df.columns and "pass_rate_percent" in df.columns:
+            st.bar_chart(df.set_index("difficulty")["pass_rate_percent"])
+
+        elif intent == "assess_completion_rate" and "assessment" in df.columns and "completion_rate_percent" in df.columns:
+            st.bar_chart(df.set_index("assessment")["completion_rate_percent"])
+
+        elif intent == "assess_list" and "title" in df.columns and "shortlisted_count" in df.columns:
+            st.bar_chart(df.set_index("title")["shortlisted_count"])
+
     except Exception:
         pass  # Charts are best-effort
 

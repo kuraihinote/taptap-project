@@ -34,6 +34,11 @@ from constants import (
     INTENT_EMP_MOST_SOLVED, INTENT_EMP_RECENT_ACTIVITY,
     INTENT_EMP_HARDEST_QUESTIONS, INTENT_EMP_DAILY_TREND,
     INTENT_EMP_PASS_RATE, INTENT_EMP_USER_PROFILE,
+    INTENT_ASSESS_LIST, INTENT_ASSESS_OVERVIEW,
+    INTENT_ASSESS_STUDENT_RESULT, INTENT_ASSESS_TOP_SCORERS,
+    INTENT_ASSESS_PASS_RATE, INTENT_ASSESS_SKILL_BREAKDOWN,
+    INTENT_ASSESS_DIFFICULTY_BREAKDOWN, INTENT_ASSESS_COMPLETION_RATE,
+    INTENT_ASSESS_RECENT, INTENT_ASSESS_STUDENT_ATTEMPTS,
 )
 from models import GraphState
 from tool import TOOL_MAP
@@ -103,6 +108,17 @@ INTENT_TO_TOOL: dict[str, str] = {
     INTENT_EMP_DAILY_TREND:          "emp_daily_trend_tool",
     INTENT_EMP_PASS_RATE:            "emp_pass_rate_tool",
     INTENT_EMP_USER_PROFILE:         "emp_user_profile_tool",
+    # Assess
+    INTENT_ASSESS_LIST:              "assess_list_tool",
+    INTENT_ASSESS_OVERVIEW:          "assess_overview_tool",
+    INTENT_ASSESS_STUDENT_RESULT:    "assess_student_result_tool",
+    INTENT_ASSESS_TOP_SCORERS:       "assess_top_scorers_tool",
+    INTENT_ASSESS_PASS_RATE:         "assess_pass_rate_tool",
+    INTENT_ASSESS_SKILL_BREAKDOWN:   "assess_skill_breakdown_tool",
+    INTENT_ASSESS_DIFFICULTY_BREAKDOWN: "assess_difficulty_breakdown_tool",
+    INTENT_ASSESS_COMPLETION_RATE:   "assess_completion_rate_tool",
+    INTENT_ASSESS_RECENT:            "assess_recent_tool",
+    INTENT_ASSESS_STUDENT_ATTEMPTS:  "assess_student_attempts_tool",
 }
 
 
@@ -147,6 +163,12 @@ RULE 7 — emp_user_profile NEVER uses info_type:
 emp_user_profile always returns all sections (summary, submissions, question status).
 Do NOT extract info_type, streaks, badges etc. for emp_user_profile. Those params only apply
 to pod_student_profile.
+
+RULE 8 — ASSESS PASS RATE vs EMP DOMAIN BREAKDOWN:
+"pass rate for [name]" where name looks like a job title or assessment
+(e.g. "Backend Developer", "Web Developer", "Frontend Developer", "Smart Interview", "DSA in c")
+→ use assess_pass_rate with assessment_title set. NOT emp_domain_breakdown.
+Only use emp_domain_breakdown when the subject is a CS topic like "Data Structures", "Algorithms", "Mathematics".
 
 ════════════════════════════════════════════════════════
 INTENT DEFINITIONS
@@ -229,6 +251,15 @@ pod_student_profile
   params: student_name (str, required), college_name (str, optional), date_filter (str, optional — "today" or "YYYY-MM-DD"), info_type (str, optional — "submissions"/"streaks"/"badges"/"coins"/"all", default "all"), language (str, optional — e.g. "python", "java", "cpp"), week_filter (bool, optional — true if user says "this week"), pod_type (str, optional — "coding"/"aptitude"/"verbal")
   use for: "[name]'s POD profile", "how is [name] doing" (no module specified), "[name]'s streaks/badges/submissions"
   DEFAULT: if no module is mentioned and a student name is given, use this intent
+  PARAM EXTRACTION EXAMPLES — always extract these:
+    "coding submissions" / "coding questions" / "coding POD" → pod_type = "coding"
+    "aptitude submissions" / "aptitude questions" / "aptitude POD" → pod_type = "aptitude"
+    "verbal submissions" / "verbal questions" / "verbal POD" → pod_type = "verbal"
+    "this week" / "past week" / "weekly" → week_filter = true
+    "in python" / "python submissions" / "using java" → language = "python"/"java"/etc
+    "submissions only" / "only submissions" → info_type = "submissions"
+    "streaks" / "streak history" → info_type = "streaks"
+    "badges" / "badge history" → info_type = "badges"
 
 --- EMPLOYABILITY: LEADERBOARDS ---
 emp_top_scorers
@@ -289,11 +320,75 @@ emp_user_profile
   use for: "[name]'s employability profile", "[name] in employability", "employability history for [name]"
   ONLY use when user explicitly mentions "employability" + a person's name
   DO NOT extract info_type — this intent always returns all sections
+  PARAM EXTRACTION EXAMPLES — always extract these:
+    "hard questions only" / "only hard" / "hard difficulty" → difficulty = "hard"
+    "medium questions" / "medium difficulty" → difficulty = "medium"
+    "easy questions" / "easy difficulty" → difficulty = "easy"
+    "in python" / "python only" / "using java" → language = "python"/"java"/etc
+
+--- ASSESS: ASSESSMENTS MODULE ---
+IMPORTANT — ASSESSMENT TITLE EXTRACTION:
+When a user mentions an assessment title, always extract the FULL title verbatim as the user typed it.
+Assessment titles are multi-word names like "Web Developer - Angular - Smart Interview" or
+"Backend Developer - Dsa in c". Do NOT truncate to just the last part (e.g. do NOT extract
+"Smart Interview" from "Web Developer - Angular - Smart Interview" — extract the full string).
+
+assess_list
+  params: assessment_title (str, optional — set when user filters by role/keyword e.g. "java", "angular")
+  use for: "list all assessments", "show all assessments", "show assessments for java developer",
+           "what assessments are there for [role]"
+
+assess_recent
+  params: limit (int, default 10)
+  use for: "recent assessments", "latest assessments", "newest assessments"
+
+assess_overview
+  params: assessment_title (str, optional — set when user names a specific assessment)
+  use for: "[assessment name] overview", "details for [assessment]", "how did [assessment] go",
+           "shortlisted vs submitted for [assessment]"
+  If no title given, returns overview of all assessments.
+
+assess_top_scorers
+  params: assessment_title (str, optional), limit (int, default 10)
+  use for: "top scorers in [assessment]", "who scored highest in [assessment]", "assessment leaderboard"
+
+assess_pass_rate
+  params: assessment_title (str, optional)
+  use for: "pass rate for [assessment]", "how many passed [assessment]", "assessment pass rate"
+  NOTE: this is for recruiter assessments only — for employability pass rate use emp_pass_rate,
+        for POD pass rate use pod_pass_rate
+
+assess_skill_breakdown
+  params: assessment_title (str, optional)
+  use for: "skill breakdown for [assessment]", "which skills did students struggle with",
+           "performance by skill/topic in [assessment]"
+
+assess_difficulty_breakdown
+  params: assessment_title (str, optional)
+  use for: "difficulty breakdown for [assessment]", "easy vs hard in [assessment]",
+           "performance by difficulty in [assessment]"
+
+assess_completion_rate
+  params: assessment_title (str, optional)
+  use for: "how many completed [assessment]", "completion rate for [assessment]",
+           "who didn't attempt [assessment]", "shortlisted vs submitted"
+
+assess_student_result
+  params: student_name (str, required), assessment_title (str, optional)
+  use for: "[name]'s result in [assessment]", "how did [name] do in [assessment]",
+           "[name]'s assessment score", "[name] assessment performance"
+  ONLY use when a student name AND the word "assessment" or a specific assessment title is present.
+  If just a name is given with no assessment context, default to pod_student_profile.
+
+assess_student_attempts
+  params: student_name (str, required)
+  use for: "[name]'s assessment history", "all assessments taken by [name]",
+           "[name]'s attempt history across assessments"
 
 --- FALLBACK ---
 unknown
   params: (none)
-  use ONLY when the question has absolutely nothing to do with POD or Employability
+  use ONLY when the question has absolutely nothing to do with POD, Employability, or Assessments
   (e.g. weather, jokes, general coding questions)
   DO NOT use unknown for multi-module queries — pick the primary intent instead
 
@@ -355,13 +450,14 @@ async def execute_node(state: GraphState) -> dict[str, Any]:
         return {
             "data": None,
             "answer": (
-                "I can answer questions about **POD (Problem of the Day)** and **Employability Track** activity.\n\n"
+                "I can answer questions about **POD (Problem of the Day)**, **Employability Track**, and **Assessments**.\n\n"
                 "Some things you can ask:\n"
                 "- *Who solved today's POD?*\n"
                 "- *Show employability top scorers*\n"
                 "- *What's the pass rate for Data Structures?*\n"
+                "- *List all assessments*\n"
                 "- *Show [student name]'s profile*\n\n"
-                "If you asked about both POD and Employability in one question, try splitting it into two separate questions."
+                "If you asked about multiple modules in one question, try splitting it into separate questions."
             ),
         }
 

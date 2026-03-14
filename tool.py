@@ -272,6 +272,77 @@ def emp_user_profile_tool(
 
 
 # ==============================================================================
+# ASSESS MODULE TOOLS
+# ==============================================================================
+
+@tool
+def assess_list_tool(assessment_title: Optional[str] = None) -> list[dict]:
+    """List all assessments with title, status, open/close time and student counts. Optionally filter by title keyword."""
+    logger.info(f"[tool] assess_list title={assessment_title}")
+    return analytics.get_assess_list(assessment_title=assessment_title)
+
+@tool
+def assess_overview_tool(assessment_title: Optional[str] = None) -> list[dict]:
+    """Get overview of a specific assessment — shortlisted, submitted, pass rate, avg score."""
+    logger.info(f"[tool] assess_overview title={assessment_title}")
+    return analytics.get_assess_overview(assessment_title=assessment_title)
+
+@tool
+def assess_student_result_tool(
+    student_name: str,
+    assessment_title: Optional[str] = None,
+) -> list[dict]:
+    """Get a student's per-question results for all or a specific assessment."""
+    logger.info(f"[tool] assess_student_result student={student_name} title={assessment_title}")
+    return analytics.get_assess_student_result(student_name=student_name, assessment_title=assessment_title)
+
+@tool
+def assess_top_scorers_tool(
+    assessment_title: Optional[str] = None,
+    limit: int = 10,
+) -> list[dict]:
+    """Get top N students by score for a given assessment."""
+    logger.info(f"[tool] assess_top_scorers title={assessment_title} limit={limit}")
+    return analytics.get_assess_top_scorers(assessment_title=assessment_title, limit=limit)
+
+@tool
+def assess_pass_rate_tool(assessment_title: Optional[str] = None) -> list[dict]:
+    """Get pass rate per assessment, optionally filtered by title."""
+    logger.info(f"[tool] assess_pass_rate title={assessment_title}")
+    return analytics.get_assess_pass_rate(assessment_title=assessment_title)
+
+@tool
+def assess_skill_breakdown_tool(assessment_title: Optional[str] = None) -> list[dict]:
+    """Get pass rate grouped by skill/subdomain for an assessment."""
+    logger.info(f"[tool] assess_skill_breakdown title={assessment_title}")
+    return analytics.get_assess_skill_breakdown(assessment_title=assessment_title)
+
+@tool
+def assess_difficulty_breakdown_tool(assessment_title: Optional[str] = None) -> list[dict]:
+    """Get pass rate split by difficulty for an assessment."""
+    logger.info(f"[tool] assess_difficulty_breakdown title={assessment_title}")
+    return analytics.get_assess_difficulty_breakdown(assessment_title=assessment_title)
+
+@tool
+def assess_completion_rate_tool(assessment_title: Optional[str] = None) -> list[dict]:
+    """Get completion rate — shortlisted vs submitted vs in-progress for an assessment."""
+    logger.info(f"[tool] assess_completion_rate title={assessment_title}")
+    return analytics.get_assess_completion_rate(assessment_title=assessment_title)
+
+@tool
+def assess_recent_tool(limit: int = 10) -> list[dict]:
+    """Get most recently created assessments."""
+    logger.info(f"[tool] assess_recent limit={limit}")
+    return analytics.get_assess_recent(limit=limit)
+
+@tool
+def assess_student_attempts_tool(student_name: str) -> list[dict]:
+    """Get attempt history for a student across all assessments."""
+    logger.info(f"[tool] assess_student_attempts student={student_name}")
+    return analytics.get_assess_student_attempts(student_name=student_name)
+
+
+# ==============================================================================
 # TOOL REGISTRY — must be AFTER all function definitions
 # ==============================================================================
 
@@ -312,6 +383,17 @@ ALL_TOOLS = [
     emp_daily_trend_tool,
     emp_pass_rate_tool,
     emp_user_profile_tool,
+    # Assess
+    assess_list_tool,
+    assess_overview_tool,
+    assess_student_result_tool,
+    assess_top_scorers_tool,
+    assess_pass_rate_tool,
+    assess_skill_breakdown_tool,
+    assess_difficulty_breakdown_tool,
+    assess_completion_rate_tool,
+    assess_recent_tool,
+    assess_student_attempts_tool,
 ]
 
 # Dict keyed by tool name — used by llm.py to look up and call tools by name
