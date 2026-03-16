@@ -79,6 +79,7 @@ async def chat(request: ChatRequest):
     initial_state: GraphState = {
         "message":      request.message,
         "college_name": request.college_name,
+        "history":     request.history,
         "intent":       "unknown",
         "params":       {},
         "data":         None,

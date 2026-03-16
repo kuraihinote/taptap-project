@@ -21,6 +21,7 @@ class ChatRequest(BaseModel):
     college_name: Optional[str] = Field(
         None, description="Faculty's college — scopes all queries automatically"
     )
+    history: list[dict] = []
 
 
 class ChatResponse(BaseModel):
@@ -37,6 +38,7 @@ class ChatResponse(BaseModel):
 class GraphState(TypedDict, total=False):
     message:      str
     college_name: Optional[str]
+    history: list[dict]
     intent:       str
     params:       dict[str, Any]
     data:         Optional[Union[list[dict[str, Any]], dict[str, Any]]]

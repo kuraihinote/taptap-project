@@ -18,13 +18,10 @@ st.set_page_config(
 
 def _render_chart(df: pd.DataFrame, intent: str) -> None:
     try:
-        # ── POD charts ────────────────────────────────────────────────────
         if intent == "pod_difficulty_breakdown" and "difficulty" in df.columns:
             st.bar_chart(df.set_index("difficulty")["students_attempted"])
-
         elif intent == "pod_language_breakdown" and "language" in df.columns:
             st.bar_chart(df.set_index("language")["students"])
-
         elif intent in ("pod_top_passers", "pod_top_scorers", "pod_top_coins") and "name" in df.columns:
             score_col = (
                 "questions_passed" if "questions_passed" in df.columns
@@ -34,67 +31,45 @@ def _render_chart(df: pd.DataFrame, intent: str) -> None:
             )
             if score_col:
                 st.bar_chart(df.set_index("name")[score_col])
-
         elif intent in ("pod_longest_streak", "pod_active_streaks") and "streak_count" in df.columns:
             st.bar_chart(df.set_index("name")["streak_count"])
-
         elif intent == "pod_pass_rate" and "pass_rate_percent" in df.columns:
             st.bar_chart(df.set_index("college")["pass_rate_percent"])
-
-        # ── Employability charts ──────────────────────────────────────────
         elif intent == "emp_top_scorers" and "name" in df.columns and "total_score" in df.columns:
             st.bar_chart(df.set_index("name")["total_score"])
-
         elif intent == "emp_most_solved" and "name" in df.columns and "solved_count" in df.columns:
             st.bar_chart(df.set_index("name")["solved_count"])
-
         elif intent == "emp_difficulty_stats" and "difficulty" in df.columns and "pass_rate_percent" in df.columns:
             st.bar_chart(df.set_index("difficulty")["pass_rate_percent"])
-
         elif intent == "emp_language_stats" and "language" in df.columns and "total_submissions" in df.columns:
             st.bar_chart(df.set_index("language")["total_submissions"])
-
         elif intent == "emp_domain_breakdown" and "domain" in df.columns and "total_submissions" in df.columns:
             st.bar_chart(df.set_index("domain")["total_submissions"])
-
         elif intent == "emp_pass_rate" and "college" in df.columns and "pass_rate_percent" in df.columns:
             st.bar_chart(df.set_index("college")["pass_rate_percent"])
-
         elif intent == "emp_daily_trend" and "submission_date" in df.columns and "total_submissions" in df.columns:
             st.line_chart(df.set_index("submission_date")["total_submissions"])
-
         elif intent == "emp_hardest_questions" and "title" in df.columns and "pass_rate_percent" in df.columns:
             st.bar_chart(df.set_index("title")["pass_rate_percent"])
-
         elif intent == "emp_subdomain_breakdown" and "sub_domain" in df.columns and "total_submissions" in df.columns:
             st.bar_chart(df.set_index("sub_domain")["total_submissions"])
-
         elif intent == "emp_question_type_stats" and "question_type" in df.columns and "total_submissions" in df.columns:
             st.bar_chart(df.set_index("question_type")["total_submissions"])
-
         elif intent == "emp_recent_activity" and "name" in df.columns:
             counts = df.groupby("name").size().sort_values(ascending=False).head(20)
             st.bar_chart(counts)
-
-        # ── Assess charts ─────────────────────────────────────────────────
         elif intent == "assess_top_scorers" and "name" in df.columns and "total_score" in df.columns:
             st.bar_chart(df.set_index("name")["total_score"])
-
         elif intent == "assess_pass_rate" and "assessment" in df.columns and "pass_rate_percent" in df.columns:
             st.bar_chart(df.set_index("assessment")["pass_rate_percent"])
-
         elif intent == "assess_skill_breakdown" and "skill" in df.columns and "pass_rate_percent" in df.columns:
             st.bar_chart(df.set_index("skill")["pass_rate_percent"])
-
         elif intent == "assess_difficulty_breakdown" and "difficulty" in df.columns and "pass_rate_percent" in df.columns:
             st.bar_chart(df.set_index("difficulty")["pass_rate_percent"])
-
         elif intent == "assess_completion_rate" and "assessment" in df.columns and "completion_rate_percent" in df.columns:
             st.bar_chart(df.set_index("assessment")["completion_rate_percent"])
-
         elif intent == "assess_list" and "title" in df.columns and "shortlisted_count" in df.columns:
             st.bar_chart(df.set_index("title")["shortlisted_count"])
-
     except Exception:
         pass  # Charts are best-effort
 
@@ -102,20 +77,14 @@ def _render_chart(df: pd.DataFrame, intent: str) -> None:
 # ── Data renderer — handles both list and dict (student profile) ──────────────
 
 def _render_data(data, intent: str) -> None:
-    """Render data as table(s). data can be a list of dicts or a dict of sections."""
     if not data:
         return
-
     if isinstance(data, dict):
-        # Student profile — render each section as its own table
-        # Handles both pod_student_profile and emp_user_profile
         section_labels = {
-            # POD sections
             "submissions":     "📝 Submissions",
             "streaks":         "🔥 Streaks",
             "badges":          "🏅 Badges",
             "coins":           "🪙 Coins",
-            # Employability sections
             "summary":         "📊 Performance Summary",
             "question_status": "✅ Question Status",
         }
@@ -134,7 +103,6 @@ def _render_data(data, intent: str) -> None:
                     key=f"dl_{key}_{id(data)}",
                 )
     else:
-        # Regular list response
         df = pd.DataFrame(data)
         st.dataframe(df, use_container_width=True)
         _render_chart(df, intent)
@@ -247,9 +215,17 @@ if query:
     with st.chat_message("assistant"):
         with st.spinner("Analysing…"):
             try:
+                # Build history from session — exclude the current message (last item)
+                history = [
+                    {"role": msg["role"], "content": msg["content"]}
+                    for msg in st.session_state.messages[:-1]
+                    if msg["role"] in ("user", "assistant")
+                ]
+
                 payload = {
                     "message":      query,
                     "college_name": st.session_state.college_name or None,
+                    "history":      history,
                 }
                 resp = requests.post(
                     f"{API_BASE}/chat",

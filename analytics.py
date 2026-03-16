@@ -1224,21 +1224,24 @@ _ASSESS_STOP_WORDS = {"test", "assessment", "the", "a", "an", "for", "in", "of"}
 
 def _assess_title_clause(assessment_title: Optional[str], params: dict) -> str:
     """
-    Build a WHERE clause that matches any meaningful keyword in assessment_title
-    against the assessment_title column using ILIKE.
-    e.g. "DSA test" → AND (a.assessment_title ILIKE '%DSA%')
-         "angular"  → AND (a.assessment_title ILIKE '%angular%')
-         "c assessment" → AND (a.assessment_title ILIKE '%c%')
-    Returns empty string if assessment_title is None.
+    Build a WHERE clause for assessment title filtering.
+    - If the title looks exact (contains ' - ' or > 25 chars), use a single ILIKE match.
+    - Otherwise split into keywords and OR them together, stripping stop-words.
     """
     if not assessment_title:
         return ""
+
+    # Exact title (from history carry-over or full user input) — single match
+    if " - " in assessment_title or len(assessment_title) > 25:
+        params["assess_title_exact"] = f"%{assessment_title}%"
+        return "AND a.assessment_title ILIKE :assess_title_exact"
+
+    # Short/vague input — keyword split
     keywords = [
         w for w in assessment_title.split()
         if w.lower() not in _ASSESS_STOP_WORDS
     ]
     if not keywords:
-        # fallback — use full string if all words were stop-words
         params["assess_title_0"] = f"%{assessment_title}%"
         return "AND a.assessment_title ILIKE :assess_title_0"
     clauses = []

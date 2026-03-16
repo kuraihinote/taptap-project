@@ -410,9 +410,14 @@ Only include params the user explicitly mentioned. Omit everything else.
 async def classify_node(state: GraphState) -> dict[str, Any]:
     logger.info(f"[classify] message='{state['message'][:80]}'")
     try:
+        messages = []
+        for h in state.get("history", []):
+            messages.append({"role": h["role"], "content": h["content"]})
+        messages.append({"role": "user", "content": state["message"]})
+
         response = await _llm.ainvoke([
             {"role": "system", "content": CLASSIFY_SYSTEM},
-            {"role": "user",   "content": state["message"]},
+            *messages
         ])
         raw = response.content.strip()
 
