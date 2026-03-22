@@ -1,0 +1,21 @@
+# requirements.txt — TapTap Analytics Chatbot v3
+
+# Backend
+fastapi>=0.115.0
+uvicorn[standard]>=0.30.6
+psycopg2-binary==2.9.10
+sqlalchemy[asyncio]==2.0.36
+asyncpg==0.30.0
+python-dotenv>=1.0.1
+pydantic==2.9.2
+
+# LangGraph + LangChain
+langchain==0.3.7
+langgraph==0.2.45
+langchain-openai==0.2.8
+openai==1.54.3
+
+# Frontend
+streamlit==1.40.0
+requests>=2.32.3
+pandas==2.2.3
