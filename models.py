@@ -1,9 +1,4 @@
-# models.py — TapTap POD Analytics Chatbot
-#
-# Three sections:
-#   1. Pydantic models  — API request/response shapes (used in main.py)
-#   2. LangGraph state  — TypedDict shared across classify→execute→format
-#   3. LLM instantiation — gpt_4o_mini_llm imported by llm.py
+# models.py — TapTap Analytics Chatbot (LLM Query Generation approach)
 
 from typing import Any, Optional, Union
 from pydantic import BaseModel, Field
@@ -12,43 +7,41 @@ from langchain_openai import AzureChatOpenAI
 from constants import AZURE_GPT4O_MINI_CONFIG, LLM_TEMPERATURE, LLM_MAX_TOKENS
 
 
-# ══════════════════════════════════════════════════════════════════════════════
-# 1. Pydantic Models — API Request / Response shapes
-# ══════════════════════════════════════════════════════════════════════════════
+# ── Pydantic Models ───────────────────────────────────────────────────────────
 
 class ChatRequest(BaseModel):
-    message: str = Field(..., description="Faculty's natural language question")
-    college_name: Optional[str] = Field(
-        None, description="Faculty's college — scopes all queries automatically"
-    )
-    history: list[dict] = []
+    message:      str              = Field(..., description="Faculty's natural language question")
+    college_name: Optional[str]    = Field(None, description="Faculty's college — scopes queries")
+    history:      list[dict]       = []
+    last_sql:        Optional[str] = None   # ← SQL from previous turn
+    sql_chain_count: int           = 0      # ← how many times SQL has been modified in a row
 
 
 class ChatResponse(BaseModel):
-    answer: str
-    intent: str
-    data: Optional[Union[list[dict[str, Any]], dict[str, Any]]] = None
-    error: Optional[str] = None
+    answer:          str
+    intent:          str
+    data:            Optional[list[dict[str, Any]]] = None
+    sql:             Optional[str]                  = None   # generated SQL (for debugging)
+    sql_chain_count: int                            = 0      # returned so Streamlit can persist it
+    error:           Optional[str]                  = None
 
 
-# ══════════════════════════════════════════════════════════════════════════════
-# 2. LangGraph State — shared memory flowing through classify→execute→format
-# ══════════════════════════════════════════════════════════════════════════════
+# ── LangGraph State ───────────────────────────────────────────────────────────
 
 class GraphState(TypedDict, total=False):
     message:      str
     college_name: Optional[str]
-    history: list[dict]
+    history:      list[dict]
+    last_sql:        Optional[str]   # ← SQL from previous turn
+    sql_chain_count:  int              # ← how many times SQL has been modified in a row
     intent:       str
-    params:       dict[str, Any]
-    data:         Optional[Union[list[dict[str, Any]], dict[str, Any]]]
+    data:         Optional[list[dict[str, Any]]]
+    sql:          Optional[str]
     answer:       str
     error:        Optional[str]
 
 
-# ══════════════════════════════════════════════════════════════════════════════
-# 3. LLM Instantiation — matches reference project pattern (models.py owns LLM)
-# ══════════════════════════════════════════════════════════════════════════════
+# ── LLM ───────────────────────────────────────────────────────────────────────
 
 gpt_4o_mini_llm = AzureChatOpenAI(
     openai_api_key=AZURE_GPT4O_MINI_CONFIG["api_key"],

@@ -124,6 +124,11 @@ if "messages" not in st.session_state:
 if "college_name" not in st.session_state:
     st.session_state.college_name = ""
 
+if "last_sql" not in st.session_state:
+    st.session_state.last_sql = None        # ← stores SQL from last successful response
+if "sql_chain_count" not in st.session_state:
+    st.session_state.sql_chain_count = 0    # ← tracks SQL modification chain depth
+
 
 # ── Sidebar ───────────────────────────────────────────────────────────────────
 
@@ -172,6 +177,8 @@ with st.sidebar:
     st.divider()
     if st.button("🗑️ Clear Chat", use_container_width=True):
         st.session_state.messages = []
+        st.session_state.last_sql = None        # ← reset SQL context on clear
+        st.session_state.sql_chain_count = 0    # ← reset chain count on clear
         st.rerun()
 
     st.markdown("---")
@@ -231,6 +238,8 @@ if query:
                     "message":      query,
                     "college_name": st.session_state.college_name or None,
                     "history":      history,
+                    "last_sql":        st.session_state.last_sql,        # ← send last SQL as context
+                    "sql_chain_count": st.session_state.sql_chain_count, # ← send chain depth
                 }
                 resp = requests.post(
                     f"{API_BASE}/chat",
@@ -244,6 +253,13 @@ if query:
                 intent = result.get("intent", "")
                 data   = result.get("data") or []
                 error  = result.get("error")
+                sql    = result.get("sql")
+
+                # ← persist the returned SQL and chain count for the next follow-up turn
+                if sql:
+                    st.session_state.last_sql = sql
+                # Always persist chain count regardless of whether SQL was returned
+                st.session_state.sql_chain_count = result.get("sql_chain_count", 0)
 
                 st.markdown(answer)
 

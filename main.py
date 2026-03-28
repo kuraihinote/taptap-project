@@ -1,6 +1,4 @@
-# main.py — TapTap POD Analytics Chatbot
-# FastAPI application — entry point for the backend.
-# Handles startup/shutdown, exposes /chat and /health endpoints.
+# main.py — TapTap Analytics Chatbot (LLM Query Generation approach)
 
 import decimal
 from datetime import datetime, date
@@ -10,16 +8,14 @@ from typing import Any
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
-from db import engine  # noqa: F401 — importing engine ensures DB connects at startup
+from db import engine  # noqa: F401 — ensures DB connects at startup
 from models import ChatRequest, ChatResponse, GraphState
 from llm import build_graph
 from logger import logger
 
 
-# ── Decimal / int64 serialiser ────────────────────────────────────────────────
-
 def _safe_convert(obj: Any) -> Any:
-    """Recursively convert non-JSON-serialisable types in dicts/lists."""
+    """Recursively convert non-JSON-serialisable types."""
     if isinstance(obj, list):
         return [_safe_convert(i) for i in obj]
     if isinstance(obj, dict):
@@ -36,23 +32,19 @@ def _safe_convert(obj: Any) -> Any:
     return obj
 
 
-# ── Lifespan — runs at startup and shutdown ───────────────────────────────────
-
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    logger.info("Starting TapTap POD Analytics Chatbot...")
-    app.state.graph = build_graph()   # compile LangGraph pipeline once
+    logger.info("Starting TapTap Analytics Chatbot...")
+    app.state.graph = build_graph()
     logger.info("Startup complete.")
     yield
     logger.info("Shutdown complete.")
 
 
-# ── FastAPI app ───────────────────────────────────────────────────────────────
-
 app = FastAPI(
-    title="TapTap POD Analytics Chatbot",
-    version="1.0.0",
-    description="LangGraph-powered POD analytics chatbot for college faculty.",
+    title="TapTap Analytics Chatbot",
+    version="2.0.0",
+    description="LLM SQL generation chatbot for college faculty analytics.",
     lifespan=lifespan,
 )
 
@@ -65,11 +57,9 @@ app.add_middleware(
 )
 
 
-# ── Routes ────────────────────────────────────────────────────────────────────
-
 @app.get("/health")
 async def health():
-    return {"status": "ok", "version": "1.0.0"}
+    return {"status": "ok", "version": "2.0.0"}
 
 
 @app.post("/chat", response_model=ChatResponse)
@@ -79,10 +69,12 @@ async def chat(request: ChatRequest):
     initial_state: GraphState = {
         "message":      request.message,
         "college_name": request.college_name,
-        "history":     request.history,
+        "history":      request.history,
+        "last_sql":        request.last_sql,        # ← thread last_sql into graph state
+        "sql_chain_count": request.sql_chain_count, # ← track SQL modification chain
         "intent":       "unknown",
-        "params":       {},
         "data":         None,
+        "sql":          None,
         "answer":       "",
         "error":        None,
     }
@@ -96,15 +88,11 @@ async def chat(request: ChatRequest):
     raw_data   = final_state.get("data")
     clean_data = _safe_convert(raw_data) if raw_data else None
 
-    # Return query_type as the intent label so Streamlit chart routing
-    # continues to work with the original fine-grained intent strings
-    # (e.g. "pod_top_scorers") rather than the new broad domain strings.
-    params     = final_state.get("params") or {}
-    query_type = params.get("query_type") or final_state.get("intent") or "unknown"
-
     return ChatResponse(
         answer=final_state.get("answer") or "",
-        intent=query_type,
+        intent=final_state.get("intent") or "unknown",
         data=clean_data,
+        sql=final_state.get("sql"),
+        sql_chain_count=final_state.get("sql_chain_count", 0),  # ← returned so Streamlit persists it
         error=final_state.get("error"),
     )
