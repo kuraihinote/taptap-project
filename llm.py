@@ -67,7 +67,8 @@ RULE 2 — "emp" = Employability Track questions (domains, scores, pass rates, s
          Keywords: "employability", "domain", "pass rate for [topic]", "top scorers in employability", "practice questions"
          If the query mentions "employability" anywhere → always return "emp".
 RULE 3 — "pod" = Problem of the Day questions (daily coding/aptitude/verbal challenges, streaks, badges, coins).
-         Keywords: "POD", "streak", "badge", "coin", "today's question", "problem of the day"
+         Keywords: "POD", "streak", "badge", "coin", "today's question", "problem of the day", "daily challenge"
+         "streak" always maps to POD — there is no streak concept in Employability or Assessments.
 RULE 4 — "assess" = Formal company assessment questions (shortlisted, submitted, passed assessments).
          Keywords: "shortlisted", "assessment", "who didn't submit", "who passed the [job title] assessment"
          Job title assessments: "Backend Developer", "Frontend Developer", "Angular", "Java Developer",
