@@ -363,14 +363,10 @@ def get_emp_data(question: str) -> dict[str, Any]:
 def get_pod_data(question: str) -> dict[str, Any]:
     """POD dispatcher — uses LLM SQL generation with curated schema context."""
     logger.info(f"[pod_dispatch] question='{question[:80]}'")
-    # TODO: uncomment when grants pod schema access
-    # return _generate_and_run(question, POD_SCHEMA_CONTEXT)
-    return {"data": [], "sql": None, "error": "SCHEMA_PENDING"}
+    return _generate_and_run(question, POD_SCHEMA_CONTEXT)
 
 
 def get_assess_data(question: str) -> dict[str, Any]:
     """Assessments dispatcher — uses LLM SQL generation with curated schema context."""
     logger.info(f"[assess_dispatch] question='{question[:80]}'")
-    # TODO: uncomment when grants gest schema access
-    # return _generate_and_run(question, ASSESS_SCHEMA_CONTEXT)
-    return {"data": [], "sql": None, "error": "SCHEMA_PENDING"}
+    return _generate_and_run(question, ASSESS_SCHEMA_CONTEXT)

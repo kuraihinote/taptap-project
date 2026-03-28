@@ -252,16 +252,7 @@ async def execute_node(state: GraphState) -> dict[str, Any]:
             ),
         }
 
-    # POD and Assess pending schema access
-    if intent in (INTENT_POD, INTENT_ASSESS):
-        module = "POD" if intent == INTENT_POD else "Assessments"
-        return {
-            "data": None, "sql": None, "sql_chain_count": 0,
-            "answer": (
-                f"{module} data is not yet available in this version. "
-                f"Please try an Employability Track question for now."
-            ),
-        }
+    # All three modules now active
 
     tool_name = INTENT_TO_TOOL.get(intent)
     if not tool_name or tool_name not in TOOL_MAP:
