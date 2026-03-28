@@ -1,6 +1,6 @@
 # schema_assess.py — Assessment schema context for LLM SQL generation
 # Built from DDL knowledge + all SQL queries in the original hardcoded system.
-# Ready to inject into analytics.py once Abdul grants gest schema access.
+# Active — gest schema access granted, assessment queries working.
 
 ASSESS_SCHEMA_CONTEXT = """
 You have access to the following tables for the Assessments module.

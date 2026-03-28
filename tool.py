@@ -1,6 +1,6 @@
 # tool.py — TapTap Analytics Chatbot (LLM Query Generation approach)
 # 3 synchronous @tool wrappers — matching original project pattern.
-# POD and Assess return SCHEMA_PENDING until Abdul grants access.
+# All three modules active: emp, pod, assess.
 
 from langchain_core.tools import tool
 from logger import logger

@@ -1,6 +1,6 @@
 # schema_pod.py — POD schema context for LLM SQL generation
 # Built from DDL knowledge + all SQL queries in the original hardcoded system.
-# Ready to inject into analytics.py once Abdul grants pod schema access.
+# Active — pod schema access granted, POD queries working.
 
 POD_SCHEMA_CONTEXT = """
 You have access to the following tables for the POD (Problem of the Day) module.
