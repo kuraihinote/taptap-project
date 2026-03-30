@@ -126,6 +126,8 @@ ORDER BY total_score DESC
 LIMIT 10
 
 3. PASS RATE BY DOMAIN:
+-- NOTE: For college-level pass rate rankings, always add HAVING COUNT(ets.id) >= 50
+--       to exclude colleges with too few submissions to be statistically meaningful.
 SELECT
     d.domain,
     COUNT(ets.id) AS total_submissions,
@@ -159,7 +161,44 @@ GROUP BY u.id, u.first_name, u.last_name, c.name
 ORDER BY last_active DESC
 LIMIT 20
 
-5. SUBDOMAIN BREAKDOWN (subtopic breakdown / weakest areas in a domain):
+5. ALL DOMAINS RANKED BY PASS RATE (no domain filter — use when faculty asks which domains have lowest/highest pass rate):
+SELECT
+    d.domain,
+    COUNT(ets.id)                                                             AS total_submissions,
+    COUNT(DISTINCT ets.user_id)                                               AS unique_students,
+    COUNT(CASE WHEN ets.status = 'pass' THEN 1 END)                          AS passed,
+    ROUND(COUNT(CASE WHEN ets.status = 'pass' THEN 1 END)*100.0
+          / NULLIF(COUNT(ets.id), 0), 2)                                      AS pass_rate_percent
+FROM employability_track.employability_track_submission ets
+JOIN public.domains d ON d.id = ets.domain_id
+JOIN public.user u ON u.id = ets.user_id
+WHERE u.role = 'Student'
+GROUP BY d.domain
+ORDER BY pass_rate_percent ASC
+LIMIT 50
+NOTE: Use ORDER BY pass_rate_percent ASC for lowest (weakest) domains first.
+      Use ORDER BY pass_rate_percent DESC for highest (strongest) domains first.
+
+7. STUDENTS ABOVE SUBMISSION THRESHOLD (more than N / at least N submissions):
+SELECT
+    (TRIM(u.first_name) || ' ' || TRIM(u.last_name)) AS name,
+    c.name AS college,
+    COUNT(ets.id) AS total_submissions,
+    COUNT(CASE WHEN ets.status = 'pass' THEN 1 END) AS passed,
+    ROUND(COUNT(CASE WHEN ets.status = 'pass' THEN 1 END)*100.0 / NULLIF(COUNT(ets.id),0), 2) AS pass_rate_percent
+FROM employability_track.employability_track_submission ets
+JOIN public.user u ON u.id = ets.user_id
+JOIN public.college c ON c.id = u.college_id
+WHERE u.role = 'Student'
+GROUP BY u.id, u.first_name, u.last_name, c.name
+HAVING COUNT(ets.id) > 500
+ORDER BY total_submissions DESC
+LIMIT 50
+NOTE: For 'more than N submissions' use HAVING COUNT(ets.id) > N
+      For 'at least N submissions' use HAVING COUNT(ets.id) >= N
+      For 'fewer than N submissions' use HAVING COUNT(ets.id) < N
+
+8. SUBDOMAIN BREAKDOWN (subtopic breakdown / weakest areas in a domain):
 SELECT
     d.domain,
     qsd.name AS sub_domain,

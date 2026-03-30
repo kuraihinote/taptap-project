@@ -74,7 +74,8 @@ def _validate_sql(sql: str) -> tuple[bool, str]:
     if sql == "UNSUPPORTED":
         return False, "UNSUPPORTED"
 
-    if not sql.upper().lstrip().startswith("SELECT"):
+    sql_upper = sql.upper().lstrip()
+    if not (sql_upper.startswith("SELECT") or sql_upper.startswith("WITH")):
         return False, "Only SELECT queries are allowed."
 
     if _FORBIDDEN.search(sql):
@@ -158,6 +159,7 @@ def _generate_and_run(question: str, schema_context: str) -> dict[str, Any]:
         return {"data": data, "sql": validated_sql, "error": None}
     except Exception as first_err:
         logger.warning(f"[sql_exec] DB error — attempting self-heal: {first_err}")
+        db.rollback()  # clear aborted transaction so the retry can execute cleanly
         # Self-healing retry: ask LLM to fix the syntax error only
         try:
             fix_response = _llm.invoke([

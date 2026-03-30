@@ -64,11 +64,20 @@ Your ONLY job: return which domain the question belongs to.
 RULES:
 RULE 1 — Return exactly one intent: "pod", "emp", "assess", "unknown", or "ambiguous".
 RULE 2 — "emp" = Employability Track questions (domains, scores, pass rates, student performance in practice questions).
-         Keywords: "employability", "domain", "pass rate for [topic]", "top scorers in employability", "practice questions"
+         Keywords: "employability", "domain", "pass rate for [topic]", "top scorers in employability", "practice questions",
+         "lowest pass rate", "highest pass rate", "which domain"
          If the query mentions "employability" anywhere → always return "emp".
+         "Which domain has the lowest/highest pass rate?" → always "emp" (domains only exist in Employability Track).
 RULE 3 — "pod" = Problem of the Day questions (daily coding/aptitude/verbal challenges, streaks, badges, coins).
-         Keywords: "POD", "streak", "badge", "coin", "today's question", "problem of the day", "daily challenge"
+         Keywords: "POD", "streak", "badge", "coin", "today's question", "problem of the day", "daily challenge",
+         "pod activity", "activity"
          "streak" always maps to POD — there is no streak concept in Employability or Assessments.
+         Named student + "activity" (e.g. "Show [name]'s activity") → always "pod".
+RULE 3b — POD pass rate / difficulty breakdown: "pass rate" or "average score" combined with
+         difficulty (easy/medium/hard) or POD period context → always "pod".
+         e.g. "What is the pass rate for easy PODs?" → pod
+         e.g. "Average score per difficulty in POD" → pod
+         e.g. "Pass rate by difficulty" (no other module keyword) → pod
 RULE 4 — "assess" = Formal company assessment questions (shortlisted, submitted, passed assessments).
          Keywords: "shortlisted", "assessment", "who didn't submit", "who passed the [job title] assessment"
          Job title assessments: "Backend Developer", "Frontend Developer", "Angular", "Java Developer",
@@ -99,7 +108,20 @@ RULE 8 — Follow-up questions inherit the module from prior context.
          "what about", "how about", "and the", "same query", "his ", "her "
 
 Respond ONLY with valid JSON:
-{"intent": "<pod|emp|assess|unknown|ambiguous>"}
+{"intent": "<pod|emp|assess|unknown|ambiguous>", "is_followup": <true|false>}
+
+is_followup must be true if the current message references or depends on a previous question
+in any way — including pronouns (them, they, those, it), phrases like "show the list",
+"what about", "same but", "break that down", "and those", "who are they", or any message
+that cannot be understood without the prior context.
+is_followup must be false if the current message is a fully standalone question.
+
+is_followup must be true for ALL of these patterns — even if they seem standalone:
+- Short filtering questions with no subject: "Which ones are from CMR?", "Only from Hyderabad?", "What about ECE students?"
+- College/branch filters with no verb: "From CMR?", "Only CSE?", "Hyderabad colleges only?"
+- Any question starting with "which ones", "what about", "only from", "just those", "and those"
+- Any question that is 5 words or fewer and contains a college name, branch name, or filter word
+"Which ones are from CMR?" has no standalone meaning — it is always a filter on a previous result.
 """
 
 
@@ -117,6 +139,8 @@ Rules:
 - Do NOT invent or speculate about values not in the data.
 - Do NOT mention the SQL query or database internals.
 - For averages, always state the number clearly e.g. "average of 77 students per day".
+- Never use the word "course" — this system tracks student activity and difficulty levels, not courses.
+- When data contains a "difficulty" column with values like easy/medium/hard, always refer to it as "difficulty level", never "course" or "subject".
 """
 
 # Query-type specific format overrides
@@ -144,22 +168,16 @@ async def classify_node(state: GraphState) -> dict[str, Any]:
             if m["role"] == "user"
         ]
 
-        followup_triggers = (
-            "his ", "her ", "their ", "them", "that ", "the same",
-            "this student", "above", "previous", "same assessment", "same student",
-            "skill breakdown", "difficulty breakdown", "completion rate",
-            "what about", "for it", "for that", "for this",
-            "same one", "that one", "how about", "and the",
-            "filter to", "filter by", "show only", "only from",
-            "only students", "only those", "just show", "hard only",
-            "only hard", "narrow down", "refine", "same query"
-        )
-        needs_context = any(t in state["message"].lower() for t in followup_triggers)
+        # is_followup is determined by the LLM in the response below,
+        # but we need it before the LLM call to decide whether to inject context.
+        # So we do a lightweight pre-check: if there are prior questions, always
+        # inject context and let the LLM decide via is_followup whether to use it.
+        needs_context = bool(prior)
 
         def _build_messages(include_ctx):
             msgs = [{"role": "system", "content": CLASSIFY_SYSTEM}]
             if include_ctx and prior and needs_context:
-                ctx_lines = "\n".join(f"- {q}" for q in prior[-4:])
+                ctx_lines = "\n".join(f"- {q}" for q in prior[-2:])
                 ctx = (
                     f"Previous questions (use ONLY to resolve references — do NOT copy params):\n"
                     f"{ctx_lines}"
@@ -187,6 +205,7 @@ async def classify_node(state: GraphState) -> dict[str, Any]:
 
         parsed = json.loads(raw)
         intent = parsed.get("intent", INTENT_UNKNOWN)
+        is_followup = parsed.get("is_followup", False)
 
         # Strip empty string params just in case
         params: dict[str, Any] = {k: v for k, v in parsed.get("params", {}).items()
@@ -197,8 +216,8 @@ async def classify_node(state: GraphState) -> dict[str, Any]:
         if college_name and "college_name" not in params:
             params["college_name"] = college_name
 
-        logger.info(f"[classify] intent={intent}")
-        return {"intent": intent, "params": params}
+        logger.info(f"[classify] intent={intent} is_followup={is_followup}")
+        return {"intent": intent, "params": params, "is_followup": is_followup}
 
     except Exception as exc:
         logger.error(f"[classify] failed: {exc}")
@@ -215,6 +234,7 @@ async def execute_node(state: GraphState) -> dict[str, Any]:
     college_name    = state.get("college_name")
     last_sql        = state.get("last_sql")         # ← SQL from prior turn
     sql_chain_count = state.get("sql_chain_count", 0)  # ← how many modifications in a row
+    previous_intent = state.get("previous_intent")  # ← module from prior turn
 
     # ── SQL chain drift control ────────────────────────────────────────────────
     # If SQL has been modified too many times, force a fresh regeneration
@@ -224,9 +244,41 @@ async def execute_node(state: GraphState) -> dict[str, Any]:
         last_sql = None
         sql_chain_count = 0
 
+    # ── Module switch detection ────────────────────────────────────────────────
+    # If the module changed since the last turn, reset SQL chain entirely.
+    # Prevents last_sql from a POD query being used as base for an emp query.
+    if previous_intent and previous_intent != intent and intent not in (INTENT_AMBIGUOUS, INTENT_UNKNOWN):
+        logger.info(f"[execute] module switched {previous_intent}→{intent} — resetting SQL chain")
+        last_sql = None
+        sql_chain_count = 0
+
+    # ── Follow-up override ────────────────────────────────────────────────────
+    # If it's a follow-up with no explicit module keyword, override to previous_intent
+    # regardless of whether the classifier returned a different module or ambiguous/unknown.
+    # If the message contains an explicit module keyword, the faculty genuinely switched
+    # modules — trust the classifier in that case.
+    is_followup = state.get("is_followup", False)
+    if is_followup and previous_intent:
+        explicit_module_keywords = {
+            INTENT_EMP:    ["employability", "domain", "pass rate", "practice"],
+            INTENT_ASSESS: ["assessment", "shortlisted", "submitted"],
+            INTENT_POD:    ["pod", "streak", "badge", "coin", "problem of the day"],
+        }
+        current_keywords = explicit_module_keywords.get(intent, [])
+        has_explicit_keyword = any(kw in message.lower() for kw in current_keywords)
+        if not has_explicit_keyword:
+            if intent != previous_intent or intent in (INTENT_AMBIGUOUS, INTENT_UNKNOWN):
+                # Only override if previous_intent is a real module, not ambiguous/unknown
+                if previous_intent not in (INTENT_AMBIGUOUS, INTENT_UNKNOWN):
+                    logger.info(f"[execute] is_followup=True, no explicit keyword — overriding {intent}→{previous_intent}")
+                    intent = previous_intent
+                    last_sql = state.get("last_sql")          # restore — switch detection zeroed it
+                    sql_chain_count = state.get("sql_chain_count", 0)  # restore chain count
+
     if intent == INTENT_UNKNOWN:
         return {
             "data": None, "sql": None, "sql_chain_count": 0,
+            "previous_intent": previous_intent,  # preserve — don't overwrite with unknown
             "answer": (
                 "I can answer questions about **POD (Problem of the Day)**, "
                 "**Employability Track**, and **Assessments**.\n\n"
@@ -241,6 +293,7 @@ async def execute_node(state: GraphState) -> dict[str, Any]:
     if intent == INTENT_AMBIGUOUS:
         return {
             "data": None, "sql": None, "sql_chain_count": 0,
+            "previous_intent": previous_intent,  # preserve — don't overwrite with ambiguous
             "answer": (
                 "Could you clarify which module you mean?\n\n"
                 "- **POD (Problem of the Day)** — daily coding/aptitude/verbal challenges\n"
@@ -266,16 +319,7 @@ async def execute_node(state: GraphState) -> dict[str, Any]:
     # for the SQL generator to modify — not natural language history.
     # This prevents the LLM from generating two separate SELECT statements.
 
-    followup_triggers = (
-        "his ", "her ", "their ", "them", "that ", "the same",
-        "this student", "above", "previous", "same assessment", "same student",
-        "what about", "for it", "for that", "for this",
-        "same one", "that one", "how about", "and the",
-        "filter to", "filter by", "show only", "only from", "only students",
-        "only those", "narrow down", "just show", "hard only", "only hard",
-        "refine", "same query"
-    )
-    is_followup = any(t in message.lower() for t in followup_triggers)
+    is_followup = state.get("is_followup", False)
 
     if is_followup and last_sql:
         # Pass the previous SQL as the base — LLM modifies it, not regenerates
@@ -341,7 +385,7 @@ async def execute_node(state: GraphState) -> dict[str, Any]:
                 ),
             }
 
-        return {"data": result.get("data", []), "sql": result.get("sql"), "sql_chain_count": sql_chain_count}
+        return {"intent": intent, "data": result.get("data", []), "sql": result.get("sql"), "sql_chain_count": sql_chain_count, "previous_intent": intent}
 
     except Exception as exc:
         logger.error(f"[execute] tool error: {exc}")
@@ -373,7 +417,10 @@ async def format_node(state: GraphState) -> dict[str, Any]:
     msg_lower = state.get("message", "").lower()
     is_profile_query = (
         any(w in msg_lower for w in ("profile", "how is", "how did", "show me")) and
-        not any(w in msg_lower for w in ("top", "leaderboard", "scorers", "best", "all students", "list"))
+        not any(w in msg_lower for w in (
+            "top", "leaderboard", "scorers", "best", "all students", "list",
+            "more than", "less than", "at least", "students who", "submission"
+        ))
     )
     if is_profile_query:
         names = list(dict.fromkeys(

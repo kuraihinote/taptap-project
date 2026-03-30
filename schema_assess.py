@@ -34,7 +34,7 @@ gest.assessment_final_attempt_submission (
     user_id             VARCHAR       -- student user ID (VARCHAR, joins to public.user.id)
     assessment_id       VARCHAR       -- FK to gest.assessment_shortlist.id::text
     question_id         INTEGER
-    status              TEXT          -- 'pass' or 'fail'
+    status              TEXT          -- 'pass', 'fail', 'partiallyCorrect', 'underReview'
     obtained_score      NUMERIC       -- score earned on this question
     question_score      NUMERIC       -- max possible score
     language            VARCHAR       -- programming language used
@@ -102,7 +102,10 @@ IMPORTANT NOTES
   If title contains ' - ' or is > 25 chars, use exact match: ILIKE '%full title%'
   Otherwise split keywords: (ILIKE '%word1%' OR ILIKE '%word2%')
 - For student name filtering: (TRIM(u.first_name) || ' ' || TRIM(u.last_name)) ILIKE '%name%'
+- Status values in assessment_final_attempt_submission: 'pass', 'fail', 'partiallyCorrect', 'underReview'
+  'partiallyCorrect' = answered but not full marks; 'underReview' = not yet graded — exclude from pass rate
 - For pass rate: ROUND(COUNT(CASE WHEN s.status='pass' THEN 1 END)*100.0 / NULLIF(COUNT(s.id),0), 2)
+  Pass rate denominator includes all statuses. To count only graded: add WHERE s.status IN ('pass','fail','partiallyCorrect')
 - Today's date: {today}
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -248,4 +251,39 @@ SELECT
 FROM gest.assessment_shortlist a
 WHERE a.assessment_title ILIKE '%keyword%'
 ORDER BY a.created_at DESC
+
+10. STUDENTS SHORTLISTED ACROSS MULTIPLE ASSESSMENTS:
+-- shortlisted_students is a JSONB array of user ID strings — expand with jsonb_array_elements_text()
+WITH shortlisted AS (
+    SELECT
+        a.id        AS assessment_id,
+        a.assessment_title,
+        jsonb_array_elements_text(a.shortlisted_students) AS user_id
+    FROM gest.assessment_shortlist a
+)
+SELECT
+    (TRIM(u.first_name) || ' ' || TRIM(u.last_name)) AS name,
+    u.email, c.name AS college,
+    COUNT(DISTINCT sl.assessment_id) AS assessments_shortlisted
+FROM shortlisted sl
+JOIN public.user u ON u.id = sl.user_id
+LEFT JOIN public.college c ON c.id = u.college_id
+WHERE u.role = 'Student'
+GROUP BY u.id, u.first_name, u.last_name, u.email, c.name
+HAVING COUNT(DISTINCT sl.assessment_id) > 1
+ORDER BY assessments_shortlisted DESC
+LIMIT 50
+NOTE: This covers ALL shortlisted students including those who never submitted.
+      For submitted-only counts, use assessment_final_attempt_submission instead.
+      Change HAVING > 1 to HAVING >= N for "shortlisted in at least N assessments".
+      Add WHERE a.assessment_title ILIKE '%keyword%' inside the CTE to filter by type.
+
+11. SUBMITTED BUT DID NOT PASS:
+SELECT COUNT(DISTINCT s.user_id) AS students_not_passed
+FROM gest.assessment_final_attempt_submission s
+WHERE s.status != 'pass'
+NOTE: To filter by a specific assessment, add:
+      JOIN gest.assessment_shortlist a ON a.id::text = s.assessment_id
+      WHERE a.assessment_title ILIKE '%keyword%' AND s.status != 'pass'
+      Status values: 'pass', 'fail', 'partiallyCorrect', 'underReview' — all except 'pass' are non-passing.
 """

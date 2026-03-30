@@ -15,6 +15,7 @@ class ChatRequest(BaseModel):
     history:      list[dict]       = []
     last_sql:        Optional[str] = None   # ← SQL from previous turn
     sql_chain_count: int           = 0      # ← how many times SQL has been modified in a row
+    previous_intent: Optional[str] = None   # ← intent from previous turn
 
 
 class ChatResponse(BaseModel):
@@ -23,6 +24,7 @@ class ChatResponse(BaseModel):
     data:            Optional[list[dict[str, Any]]] = None
     sql:             Optional[str]                  = None   # generated SQL (for debugging)
     sql_chain_count: int                            = 0      # returned so Streamlit can persist it
+    previous_intent: Optional[str]                 = None   # ← returned so Streamlit can persist it
     error:           Optional[str]                  = None
 
 
@@ -34,7 +36,9 @@ class GraphState(TypedDict, total=False):
     history:      list[dict]
     last_sql:        Optional[str]   # ← SQL from previous turn
     sql_chain_count:  int              # ← how many times SQL has been modified in a row
+    previous_intent: Optional[str]    # ← intent from previous turn
     intent:       str
+    is_followup:  bool
     data:         Optional[list[dict[str, Any]]]
     sql:          Optional[str]
     answer:       str

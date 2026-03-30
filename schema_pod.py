@@ -44,14 +44,14 @@ pod.pod_submission (
     question_id             INTEGER       -- question identifier
     title                   VARCHAR       -- question title
     difficulty              TEXT          -- 'easy', 'medium', 'hard'
-    type                    TEXT          -- 'coding', 'aptitude', 'verbal' (pod type)
     language                VARCHAR       -- language used e.g. 'python', 'java', 'c++'
     status                  TEXT          -- 'pass' or 'fail'
     obtained_score          INTEGER       -- score earned
     create_at               TIMESTAMPTZ   -- submission timestamp
 )
-KEY: status='pass' means the student solved it. Filter type for coding/aptitude/verbal.
-     JOIN to problem_of_the_day ON potd.id = ps.problem_of_the_day_id for potd.type filter.
+KEY: status='pass' means the student solved it.
+     pod_submission has NO type column — to filter coding/aptitude/verbal,
+     JOIN to problem_of_the_day ON potd.id = ps.problem_of_the_day_id and filter potd.type.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 STREAK TABLES
@@ -275,4 +275,143 @@ SELECT
     ROUND(AVG(pass_rate_percent)  OVER (), 2)   AS avg_pass_rate_percent
 FROM daily
 ORDER BY attempt_date DESC
+
+9. CONSISTENCY — students who solved POD every day in a period (e.g. every day this week):
+SELECT
+    (TRIM(u.first_name) || ' ' || TRIM(u.last_name)) AS name,
+    c.name AS college,
+    COUNT(DISTINCT ps.create_at::date) AS days_solved
+FROM pod.pod_submission ps
+JOIN public.user u ON u.id = ps.user_id
+JOIN public.college c ON c.id = u.college_id
+WHERE ps.status = 'pass'
+  AND u.role = 'Student'
+  AND ps.create_at >= date_trunc('week', CURRENT_DATE)
+GROUP BY u.id, u.first_name, u.last_name, c.name
+HAVING COUNT(DISTINCT ps.create_at::date) = (CURRENT_DATE - date_trunc('week', CURRENT_DATE)::date + 1)
+ORDER BY days_solved DESC
+LIMIT 50
+NOTE: For 'every day this week' use HAVING COUNT(DISTINCT date) = days elapsed since Monday
+      For 'every day in last 7 days' change WHERE to >= CURRENT_DATE - 7 and HAVING = 7
+      For 'every day this month' use date_trunc('month', CURRENT_DATE) and HAVING = day-of-month
+
+10. TODAY vs YESTERDAY — how many students solved POD today compared to yesterday:
+SELECT
+    COUNT(DISTINCT CASE WHEN ps.create_at::date = CURRENT_DATE     THEN ps.user_id END) AS solved_today,
+    COUNT(DISTINCT CASE WHEN ps.create_at::date = CURRENT_DATE - 1 THEN ps.user_id END) AS solved_yesterday
+FROM pod.pod_submission ps
+JOIN public.user u ON u.id = ps.user_id
+WHERE ps.status = 'pass'
+  AND ps.create_at::date >= CURRENT_DATE - 1
+  AND u.role = 'Student'
+
+11. COLLEGE RANKING — which college has the most submissions/passes in last N days:
+SELECT
+    c.name                                                                AS college,
+    COUNT(*)                                                              AS total_submissions,
+    COUNT(DISTINCT ps.user_id)                                            AS unique_students,
+    COUNT(CASE WHEN ps.status = 'pass' THEN 1 END)                       AS passed,
+    ROUND(COUNT(CASE WHEN ps.status = 'pass' THEN 1 END) * 100.0
+          / NULLIF(COUNT(*), 0), 2)                                       AS pass_rate_percent
+FROM pod.pod_submission ps
+JOIN public.user u ON u.id = ps.user_id
+JOIN public.college c ON c.id = u.college_id
+WHERE u.role = 'Student'
+  AND ps.create_at::date >= CURRENT_DATE - INTERVAL '7 days'
+GROUP BY c.id, c.name
+ORDER BY total_submissions DESC
+LIMIT 50
+
+12. AVERAGE SCORE BY DIFFICULTY LEVEL:
+SELECT
+    ps.difficulty,
+    ROUND(AVG(ps.obtained_score), 2)                                      AS avg_score,
+    ROUND(AVG(CASE WHEN ps.status = 'pass' THEN ps.obtained_score END), 2) AS avg_passing_score,
+    COUNT(*)                                                              AS total_submissions,
+    COUNT(CASE WHEN ps.status = 'pass' THEN 1 END)                        AS passed,
+    ROUND(COUNT(CASE WHEN ps.status = 'pass' THEN 1 END) * 100.0
+          / NULLIF(COUNT(*), 0), 2)                                       AS pass_rate_percent
+FROM pod.pod_submission ps
+JOIN public.user u ON u.id = ps.user_id
+WHERE u.role = 'Student'
+  AND ps.difficulty IS NOT NULL
+GROUP BY ps.difficulty
+ORDER BY CASE ps.difficulty WHEN 'easy' THEN 1 WHEN 'medium' THEN 2 WHEN 'hard' THEN 3 END
+
+13. DAILY AVERAGE ATTEMPTS OVER N DAYS (e.g. "average daily attempts this week"):
+SELECT
+    ROUND(AVG(daily_attempts), 2)  AS avg_attempts_per_day,
+    ROUND(AVG(daily_passes), 2)    AS avg_passes_per_day,
+    MIN(attempt_date)              AS period_start,
+    MAX(attempt_date)              AS period_end,
+    COUNT(*)                       AS days_counted
+FROM (
+    SELECT
+        pa.create_at::date                                                       AS attempt_date,
+        COUNT(DISTINCT pa.user_id)                                               AS daily_attempts,
+        COUNT(DISTINCT CASE WHEN ps.status = 'pass' THEN ps.user_id END)        AS daily_passes
+    FROM pod.pod_attempt pa
+    JOIN public.user u ON u.id = pa.user_id
+    LEFT JOIN pod.pod_submission ps
+        ON ps.user_id = pa.user_id
+        AND ps.problem_of_the_day_id = pa.problem_of_the_day_id
+    WHERE pa.create_at::date >= CURRENT_DATE - INTERVAL '7 days'
+      AND u.role = 'Student'
+    GROUP BY pa.create_at::date
+) daily
+
+14. SUBMISSIONS GROUPED BY DIFFICULTY (use pod_submission.difficulty directly — no JOIN needed):
+SELECT
+    ps.difficulty,
+    COUNT(*)                        AS total_submissions,
+    COUNT(DISTINCT ps.user_id)      AS unique_students,
+    COUNT(CASE WHEN ps.status = 'pass' THEN 1 END)  AS passed,
+    ROUND(COUNT(CASE WHEN ps.status = 'pass' THEN 1 END) * 100.0
+          / NULLIF(COUNT(*), 0), 2) AS pass_rate_percent
+FROM pod.pod_submission ps
+JOIN public.user u ON u.id = ps.user_id
+WHERE u.role = 'Student'
+  AND ps.difficulty IS NOT NULL
+GROUP BY ps.difficulty
+ORDER BY CASE ps.difficulty WHEN 'easy' THEN 1 WHEN 'medium' THEN 2 WHEN 'hard' THEN 3 END
+
+15. TODAY'S TOP SCORER (highest obtained_score today):
+SELECT
+    (TRIM(u.first_name) || ' ' || TRIM(u.last_name)) AS name,
+    c.name AS college,
+    ps.title, ps.difficulty, ps.language,
+    ps.obtained_score, ps.create_at
+FROM pod.pod_submission ps
+JOIN public.user u ON u.id = ps.user_id
+JOIN public.college c ON c.id = u.college_id
+WHERE ps.create_at::date = CURRENT_DATE
+  AND ps.status = 'pass'
+  AND u.role = 'Student'
+ORDER BY ps.obtained_score DESC
+LIMIT 1
+
+16. FIRST-TIME SOLVERS TODAY — users with a submission today but no record before today:
+SELECT COUNT(DISTINCT ps.user_id) AS first_time_today
+FROM pod.pod_submission ps
+WHERE ps.create_at::date = CURRENT_DATE
+  AND NOT EXISTS (
+      SELECT 1 FROM pod.pod_submission ps2
+      WHERE ps2.user_id = ps.user_id
+        AND ps2.create_at::date < CURRENT_DATE
+  )
+
+17. AVERAGE SCORE PER COLLEGE OVER N DAYS:
+SELECT
+    c.name                           AS college,
+    COUNT(*)                         AS total_submissions,
+    ROUND(AVG(ps.obtained_score), 2) AS avg_score
+FROM pod.pod_submission ps
+JOIN public.user u ON u.id = ps.user_id
+JOIN public.college c ON c.id = u.college_id
+WHERE u.role = 'Student'
+  AND ps.create_at >= CURRENT_DATE - INTERVAL '7 days'
+GROUP BY c.name
+ORDER BY avg_score DESC
+LIMIT 20
+NOTE: Change INTERVAL '7 days' to match the requested period (e.g. '30 days', '1 day').
 """

@@ -72,6 +72,7 @@ async def chat(request: ChatRequest):
         "history":      request.history,
         "last_sql":        request.last_sql,        # ← thread last_sql into graph state
         "sql_chain_count": request.sql_chain_count, # ← track SQL modification chain
+        "previous_intent": request.previous_intent, # ← module from prior turn
         "intent":       "unknown",
         "data":         None,
         "sql":          None,
@@ -94,5 +95,6 @@ async def chat(request: ChatRequest):
         data=clean_data,
         sql=final_state.get("sql"),
         sql_chain_count=final_state.get("sql_chain_count", 0),  # ← returned so Streamlit persists it
+        previous_intent=final_state.get("intent"),              # ← current intent becomes previous for next turn
         error=final_state.get("error"),
     )

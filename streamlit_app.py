@@ -128,6 +128,8 @@ if "last_sql" not in st.session_state:
     st.session_state.last_sql = None        # ← stores SQL from last successful response
 if "sql_chain_count" not in st.session_state:
     st.session_state.sql_chain_count = 0    # ← tracks SQL modification chain depth
+if "previous_intent" not in st.session_state:
+    st.session_state.previous_intent = None # ← module from last turn (for switch detection)
 
 
 # ── Sidebar ───────────────────────────────────────────────────────────────────
@@ -179,6 +181,7 @@ with st.sidebar:
         st.session_state.messages = []
         st.session_state.last_sql = None        # ← reset SQL context on clear
         st.session_state.sql_chain_count = 0    # ← reset chain count on clear
+        st.session_state.previous_intent = None # ← reset module context on clear
         st.rerun()
 
     st.markdown("---")
@@ -240,6 +243,7 @@ if query:
                     "history":      history,
                     "last_sql":        st.session_state.last_sql,        # ← send last SQL as context
                     "sql_chain_count": st.session_state.sql_chain_count, # ← send chain depth
+                    "previous_intent": st.session_state.previous_intent, # ← send prior module
                 }
                 resp = requests.post(
                     f"{API_BASE}/chat",
@@ -258,8 +262,10 @@ if query:
                 # ← persist the returned SQL and chain count for the next follow-up turn
                 if sql:
                     st.session_state.last_sql = sql
-                # Always persist chain count regardless of whether SQL was returned
+                # Always persist chain count and previous_intent regardless of whether SQL was returned
                 st.session_state.sql_chain_count = result.get("sql_chain_count", 0)
+                if result.get("previous_intent"):
+                    st.session_state.previous_intent = result["previous_intent"]
 
                 st.markdown(answer)
 
