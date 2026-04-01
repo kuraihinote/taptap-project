@@ -227,14 +227,12 @@ if query:
     with st.chat_message("assistant"):
         with st.spinner("Analysing…"):
             try:
-                # Build history from session — user messages only.
-                # Assistant answers are excluded to avoid Azure content filter
-                # false positives on data-heavy answers (student names, scores etc.)
-                # The LLM only needs prior user messages to resolve follow-ups.
+                # Build history from session — last 2 exchanges only.
+                # Supervisor needs recent context to understand follow-ups.
                 history = [
                     {"role": msg["role"], "content": msg["content"]}
-                    for msg in st.session_state.messages[:-1]
-                    if msg["role"] == "user" and msg.get("content")
+                    for msg in st.session_state.messages[-5:-1]
+                    if msg.get("content")
                 ]
 
                 payload = {

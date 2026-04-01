@@ -253,7 +253,10 @@ WHERE a.assessment_title ILIKE '%keyword%'
 ORDER BY a.created_at DESC
 
 10. STUDENTS SHORTLISTED ACROSS MULTIPLE ASSESSMENTS:
--- shortlisted_students is a JSONB array of user ID strings — expand with jsonb_array_elements_text()
+-- USE THIS PATTERN FOR: "shortlisted for more than one", "multiple assessments shortlisted",
+-- "shortlisted across assessments", "how many assessments is X shortlisted for"
+-- This is the ONLY way to query shortlisted_students — it is a JSONB array of user IDs
+-- that must be expanded with jsonb_array_elements_text() before joining to public.user
 WITH shortlisted AS (
     SELECT
         a.id        AS assessment_id,

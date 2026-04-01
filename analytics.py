@@ -3,8 +3,9 @@
 # Each feeds a curated schema context + faculty question to the LLM which
 # generates SQL, then we validate and execute it.
 
+import decimal
 import re
-from datetime import date
+from datetime import datetime, date
 from typing import Any
 from sqlalchemy import text
 from db import get_db
@@ -111,7 +112,17 @@ def _validate_sql(sql: str) -> tuple[bool, str]:
 # ══════════════════════════════════════════════════════════════════════════════
 
 def _rows_to_dicts(rows) -> list[dict]:
-    return [dict(r._mapping) for r in rows]
+    result = []
+    for r in rows:
+        row = {}
+        for k, v in r._mapping.items():
+            if isinstance(v, decimal.Decimal):
+                v = float(v)
+            elif isinstance(v, (datetime, date)):
+                v = v.isoformat()
+            row[k] = v
+        result.append(row)
+    return result
 
 
 def _generate_and_run(question: str, schema_context: str) -> dict[str, Any]:

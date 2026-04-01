@@ -1,21 +1,22 @@
-# main.py — TapTap Analytics Chatbot (LLM Query Generation approach)
+# main.py — TapTap Analytics Chatbot
 
 import decimal
+import json
 from datetime import datetime, date
 from contextlib import asynccontextmanager
 from typing import Any
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from langchain_core.messages import HumanMessage, AIMessage, ToolMessage
 
-from db import engine  # noqa: F401 — ensures DB connects at startup
-from models import ChatRequest, ChatResponse, GraphState
-from llm import build_graph
+from db import engine  # noqa: F401
+from models import ChatRequest, ChatResponse
+from llm import build_supervisor_graph
 from logger import logger
 
 
 def _safe_convert(obj: Any) -> Any:
-    """Recursively convert non-JSON-serialisable types."""
     if isinstance(obj, list):
         return [_safe_convert(i) for i in obj]
     if isinstance(obj, dict):
@@ -35,7 +36,7 @@ def _safe_convert(obj: Any) -> Any:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("Starting TapTap Analytics Chatbot...")
-    app.state.graph = build_graph()
+    app.state.graph = build_supervisor_graph()
     logger.info("Startup complete.")
     yield
     logger.info("Shutdown complete.")
@@ -44,7 +45,6 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="TapTap Analytics Chatbot",
     version="2.0.0",
-    description="LLM SQL generation chatbot for college faculty analytics.",
     lifespan=lifespan,
 )
 
@@ -66,35 +66,72 @@ async def health():
 async def chat(request: ChatRequest):
     logger.info(f"/chat message='{request.message[:80]}' college='{request.college_name}'")
 
-    initial_state: GraphState = {
-        "message":      request.message,
-        "college_name": request.college_name,
-        "history":      request.history,
-        "last_sql":        request.last_sql,        # ← thread last_sql into graph state
-        "sql_chain_count": request.sql_chain_count, # ← track SQL modification chain
-        "previous_intent": request.previous_intent, # ← module from prior turn
-        "intent":       "unknown",
-        "data":         None,
-        "sql":          None,
-        "answer":       "",
-        "error":        None,
-    }
+    # Build message history for the supervisor
+    # Include prior user questions + assistant answers for follow-up context
+    messages = []
+    for msg in (request.history or []):
+        if msg.get("role") == "user":
+            messages.append(HumanMessage(content=msg["content"]))
+        elif msg.get("role") == "assistant":
+            messages.append(AIMessage(content=msg["content"]))
+
+    # Add college filter to current message if set
+    current_message = request.message
+    if request.college_name:
+        current_message += f" (filter to college: {request.college_name})"
+
+    messages.append(HumanMessage(content=current_message))
 
     try:
-        final_state: dict = await app.state.graph.ainvoke(initial_state)
+        result = await app.state.graph.ainvoke({"messages": messages})
     except Exception as exc:
         logger.error(f"/chat graph error: {exc}")
         raise HTTPException(status_code=500, detail=str(exc))
 
-    raw_data   = final_state.get("data")
-    clean_data = _safe_convert(raw_data) if raw_data else None
+    all_messages = result.get("messages", [])
+
+    # Extract the last AI message as the answer
+    answer = ""
+    for msg in reversed(all_messages):
+        if isinstance(msg, AIMessage) and msg.content:
+            answer = msg.content.strip()
+            break
+
+    if not answer:
+        answer = "No answer returned."
+
+    # Extract data and sql from tool messages
+    data = None
+    sql = None
+
+    for msg in all_messages:
+        if isinstance(msg, ToolMessage):
+            try:
+                tool_result = json.loads(msg.content)
+                if isinstance(tool_result, dict) and "data" in tool_result:
+                    data = _safe_convert(tool_result.get("data"))
+                    sql  = tool_result.get("sql")
+            except Exception as e:
+                logger.warning(f"[main] ToolMessage parse failed: {e}")
+
+    # Extract intent from AIMessage tool_calls
+    intent = ""
+    for msg in all_messages:
+        if isinstance(msg, AIMessage) and msg.tool_calls:
+            tool_name = msg.tool_calls[0].get("name", "")
+            intent = {
+                "emp_data_tool":    "emp",
+                "pod_data_tool":    "pod",
+                "assess_data_tool": "assess",
+            }.get(tool_name, "")
+
 
     return ChatResponse(
-        answer=final_state.get("answer") or "",
-        intent=final_state.get("intent") or "unknown",
-        data=clean_data,
-        sql=final_state.get("sql"),
-        sql_chain_count=final_state.get("sql_chain_count", 0),  # ← returned so Streamlit persists it
-        previous_intent=final_state.get("intent"),              # ← current intent becomes previous for next turn
-        error=final_state.get("error"),
+        answer=answer,
+        intent=intent,
+        data=data,
+        sql=sql,
+        sql_chain_count=0,
+        previous_intent=None,
+        error=None,
     )
