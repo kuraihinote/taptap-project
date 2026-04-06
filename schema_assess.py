@@ -6,6 +6,9 @@ ASSESS_SCHEMA_CONTEXT = """
 You have access to the following tables for the Assessments module.
 Use ONLY these tables and columns — do not reference any other tables.
 
+THIS MODULE COVERS: formal named assessments only — company-specific tests (e.g. "Backend Developer - DSA in C"), MET (Monthly Employability Test), profiling tests, skill tests. Use for shortlisted students, submission results for a specific named test, completion rates, pass rates for a named assessment, and assessment overviews.
+NOT FOR: subject domain pass rates (Data Structures, Python, Algorithms etc.), individual practice questions, employability scores — those are in the emp module.
+
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 CORE TABLES
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -14,8 +17,8 @@ CORE TABLES
 gest.assessment_shortlist (
     id                              UUID          -- primary key (cast to text for joins)
     assessment_title                VARCHAR       -- e.g. 'Backend Developer - DSA in C | Easy-Medium'
-    status                          VARCHAR       -- assessment status
-    assessment_type                 VARCHAR       -- type of assessment
+    status                          VARCHAR       -- always 'shortlisted' for all rows, not a useful filter
+    assessment_type                 VARCHAR       -- 'open' = active/live assessment | 'shortlisted' = shortlisted but not yet active
     open_time                       TIMESTAMPTZ   -- when assessment opens
     close_time                      TIMESTAMPTZ   -- when assessment closes
     round_number                    INTEGER       -- round number
@@ -107,6 +110,13 @@ IMPORTANT NOTES
 - For pass rate: ROUND(COUNT(CASE WHEN s.status='pass' THEN 1 END)*100.0 / NULLIF(COUNT(s.id),0), 2)
   Pass rate denominator includes all statuses. To count only graded: add WHERE s.status IN ('pass','fail','partiallyCorrect')
 - Today's date: {today}
+- Never filter by status column — it is always 'shortlisted' for all rows, use assessment_type instead
+- For active/open assessments: WHERE a.assessment_type = 'open'
+- For shortlisted but not yet active: WHERE a.assessment_type = 'shortlisted'
+- round_number values: 1 through 4 — use for filtering by round
+- created_at range: Dec 2025 → Mar 2026 — use for recent/date-based filtering
+- open_time and close_time range: Dec 2025 → Mar 2026 — use for currently open assessments:
+  open now = open_time <= CURRENT_TIMESTAMP AND close_time >= CURRENT_TIMESTAMP
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 STANDARD QUERY PATTERNS — MANDATORY
@@ -116,13 +126,27 @@ STANDARD QUERY PATTERNS — MANDATORY
 SELECT
     a.id::text AS id,
     a.assessment_title AS title,
-    a.status, a.assessment_type,
+    a.assessment_type,
     a.open_time, a.close_time, a.round_number,
     jsonb_array_length(a.shortlisted_students)::int          AS shortlisted_count,
     jsonb_array_length(a.assessment_submitted_students)::int AS submitted_count,
     a.created_at
 FROM gest.assessment_shortlist a
 WHERE 1=1
+ORDER BY a.created_at DESC
+LIMIT 20
+
+1b. LIST OPEN/ACTIVE ASSESSMENTS (use when faculty asks for "open", "active", "live", "current" assessments):
+SELECT
+    a.id::text AS id,
+    a.assessment_title AS title,
+    a.assessment_type,
+    a.open_time, a.close_time, a.round_number,
+    jsonb_array_length(a.shortlisted_students)::int          AS shortlisted_count,
+    jsonb_array_length(a.assessment_submitted_students)::int AS submitted_count,
+    a.created_at
+FROM gest.assessment_shortlist a
+WHERE a.assessment_type = 'open'
 ORDER BY a.created_at DESC
 LIMIT 20
 

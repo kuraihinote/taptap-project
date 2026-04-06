@@ -3,7 +3,7 @@
 from typing import Any, Optional
 from pydantic import BaseModel, Field
 from langchain_openai import AzureChatOpenAI
-from constants import AZURE_GPT4O_MINI_CONFIG, LLM_TEMPERATURE, LLM_MAX_TOKENS
+from constants import AZURE_GPT4O_MINI_CONFIG
 
 
 # ── Pydantic Models ───────────────────────────────────────────────────────────
@@ -34,8 +34,6 @@ gpt_4o_mini_llm = AzureChatOpenAI(
     openai_api_version=AZURE_GPT4O_MINI_CONFIG["api_version"],
     azure_endpoint=AZURE_GPT4O_MINI_CONFIG["azure_endpoint"],
     deployment_name=AZURE_GPT4O_MINI_CONFIG["deployment_name"],
-    temperature=LLM_TEMPERATURE,
-    max_tokens=LLM_MAX_TOKENS,
 )
 
 if not gpt_4o_mini_llm:

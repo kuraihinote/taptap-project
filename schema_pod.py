@@ -6,6 +6,9 @@ POD_SCHEMA_CONTEXT = """
 You have access to the following tables for the POD (Problem of the Day) module.
 Use ONLY these tables and columns — do not reference any other tables.
 
+THIS MODULE COVERS: Problem of the Day activity only — daily challenges, who solved today, streaks, badges, coins, fastest solver, difficulty levels (easy/medium/hard), POD types (coding/aptitude/verbal), college rankings by POD activity.
+NOT FOR: employability practice questions, formal assessments, company tests — those are in emp and assess modules.
+
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 CORE TABLES
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

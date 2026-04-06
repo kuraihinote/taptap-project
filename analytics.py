@@ -10,11 +10,8 @@ from typing import Any
 from sqlalchemy import text
 from db import get_db
 from logger import logger
-from constants import SQL_MAX_ROWS, SQL_MAX_CHAIN
+from constants import SQL_MAX_ROWS
 from models import gpt_4o_mini_llm as _llm
-from schema_emp    import EMP_SCHEMA_CONTEXT
-from schema_pod    import POD_SCHEMA_CONTEXT
-from schema_assess import ASSESS_SCHEMA_CONTEXT
 
 
 
@@ -40,8 +37,10 @@ RULES:
 5. Always use table aliases for readability.
 6. Round decimal results to 2 places using ROUND(..., 2).
 7. For pass rates: ROUND(COUNT(CASE WHEN status = 'pass' THEN 1 END) * 100.0 / NULLIF(COUNT(*), 0), 2)
-8. If the question cannot be answered from the given schema, return exactly: UNSUPPORTED
-9. Never expose passwords, tokens, or internal system columns.
+8. For questions about students scoring above or below a percentage threshold on employability (e.g. less than 50%, more than 20%, above 80%), always use Pattern 6 from the schema context. Never return UNSUPPORTED for percentage threshold questions.
+9. For any question that mentions a percentage, score threshold, or employability score filter, attempt to write SQL using SUM(obtained_score) * 100.0 / NULLIF(SUM(points), 0) grouped by student — do not return UNSUPPORTED.
+10. If the question cannot be answered from the given schema, return exactly: UNSUPPORTED
+11. Never expose passwords, tokens, or internal system columns.
 
 CRITICAL — STANDARD PATTERNS:
 The schema context contains STANDARD QUERY PATTERNS. These are mandatory templates.
@@ -201,23 +200,3 @@ def _generate_and_run(question: str, schema_context: str) -> dict[str, Any]:
             return {"data": [], "sql": validated_sql, "error": str(first_err)}
 
 
-# ══════════════════════════════════════════════════════════════════════════════
-# DOMAIN DISPATCHERS — synchronous, matching original project pattern
-# ══════════════════════════════════════════════════════════════════════════════
-
-def get_emp_data(question: str) -> dict[str, Any]:
-    """Employability Track dispatcher."""
-    logger.info(f"[emp_dispatch] question='{question[:80]}'")
-    return _generate_and_run(question, EMP_SCHEMA_CONTEXT)
-
-
-def get_pod_data(question: str) -> dict[str, Any]:
-    """POD dispatcher — uses LLM SQL generation with curated schema context."""
-    logger.info(f"[pod_dispatch] question='{question[:80]}'")
-    return _generate_and_run(question, POD_SCHEMA_CONTEXT)
-
-
-def get_assess_data(question: str) -> dict[str, Any]:
-    """Assessments dispatcher — uses LLM SQL generation with curated schema context."""
-    logger.info(f"[assess_dispatch] question='{question[:80]}'")
-    return _generate_and_run(question, ASSESS_SCHEMA_CONTEXT)

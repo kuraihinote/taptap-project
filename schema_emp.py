@@ -5,6 +5,9 @@ EMP_SCHEMA_CONTEXT = """
 You have access to the following tables for the Employability Track module.
 Use ONLY these tables and columns — do not reference any other tables.
 
+THIS MODULE COVERS: student practice activity on individual questions organised by subject domain (Data Structures, Python, Algorithms, Java, SQL, DBMS, OOP, Operating Systems etc.), difficulty level, programming language, pass rates on topics, employability score percentages, submission counts, top scorers, and student profiles.
+NOT FOR: named company tests, MET, profiling tests, formal assessments — those are in the assess module.
+
 -- Main submissions table (76,317 rows)
 employability_track.employability_track_submission (
     user_id        VARCHAR     -- FK to public.user.id
@@ -178,6 +181,29 @@ ORDER BY pass_rate_percent ASC
 LIMIT 50
 NOTE: Use ORDER BY pass_rate_percent ASC for lowest (weakest) domains first.
       Use ORDER BY pass_rate_percent DESC for highest (strongest) domains first.
+
+6. EMPLOYABILITY SCORE PERCENTAGE PER STUDENT (use for: students above/below/less than/more than X% employability score, employability percentage threshold, score percentage filter, who has less than X% score, who scored more than X%):
+-- Employability score % = SUM(obtained_score) / SUM(points) * 100
+-- Use HAVING to filter by threshold (e.g. less than 50%, more than 80%)
+SELECT
+    (TRIM(u.first_name) || ' ' || TRIM(u.last_name)) AS name,
+    c.name AS college,
+    COUNT(ets.id) AS total_submissions,
+    SUM(ets.obtained_score) AS total_obtained,
+    SUM(ets.points) AS total_possible,
+    ROUND(SUM(ets.obtained_score) * 100.0 / NULLIF(SUM(ets.points), 0), 2) AS employability_score_percent
+FROM employability_track.employability_track_submission ets
+JOIN public.user u ON u.id = ets.user_id
+JOIN public.college c ON c.id = u.college_id
+WHERE u.role = 'Student'
+GROUP BY u.id, u.first_name, u.last_name, c.name
+HAVING ROUND(SUM(ets.obtained_score) * 100.0 / NULLIF(SUM(ets.points), 0), 2) < 50
+ORDER BY employability_score_percent ASC
+LIMIT 50
+NOTE: For 'less than X%' use HAVING ... < X
+      For 'more than X%' use HAVING ... > X
+      For 'above X%' use HAVING ... >= X
+      For 'below X%' use HAVING ... < X      
 
 7. STUDENTS ABOVE SUBMISSION THRESHOLD (more than N / at least N submissions):
 SELECT

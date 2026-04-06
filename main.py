@@ -1,18 +1,18 @@
 # main.py — TapTap Analytics Chatbot
 
 import decimal
-import json
 from datetime import datetime, date
 from contextlib import asynccontextmanager
 from typing import Any
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from langchain_core.messages import HumanMessage, AIMessage, ToolMessage
+from langchain_core.messages import HumanMessage, AIMessage
 
 from db import engine  # noqa: F401
 from models import ChatRequest, ChatResponse
 from llm import build_supervisor_graph
+from constants import DUMMY_FACULTY_ID
 from logger import logger
 
 
@@ -36,15 +36,27 @@ def _safe_convert(obj: Any) -> Any:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("Starting TapTap Analytics Chatbot...")
-    app.state.graph = build_supervisor_graph()
+
+    # build_supervisor_graph is async — it sets up the checkpointer connection
+    # and returns (graph, pg_ctx). pg_ctx is None when using MemorySaver.
+    graph, pg_ctx = await build_supervisor_graph()
+
+    app.state.graph  = graph
+    app.state.pg_ctx = pg_ctx  # kept so we can close it cleanly on shutdown
+
     logger.info("Startup complete.")
     yield
+
+    # ── Shutdown ──────────────────────────────────────────────────────────────
+    if pg_ctx is not None:
+        logger.info("Closing Postgres checkpoint connection...")
+        await pg_ctx.__aexit__(None, None, None)
     logger.info("Shutdown complete.")
 
 
 app = FastAPI(
     title="TapTap Analytics Chatbot",
-    version="2.0.0",
+    version="3.0.0",
     lifespan=lifespan,
 )
 
@@ -59,72 +71,60 @@ app.add_middleware(
 
 @app.get("/health")
 async def health():
-    return {"status": "ok", "version": "2.0.0"}
+    return {"status": "ok", "version": "3.0.0"}
 
 
 @app.post("/chat", response_model=ChatResponse)
 async def chat(request: ChatRequest):
     logger.info(f"/chat message='{request.message[:80]}' college='{request.college_name}'")
 
-    # Build message history for the supervisor
-    # Include prior user questions + assistant answers for follow-up context
-    messages = []
-    for msg in (request.history or []):
-        if msg.get("role") == "user":
-            messages.append(HumanMessage(content=msg["content"]))
-        elif msg.get("role") == "assistant":
-            messages.append(AIMessage(content=msg["content"]))
+    # ── Thread ID ─────────────────────────────────────────────────────────────
+    # LangGraph uses this as the key to load/save conversation history.
+    # DUMMY_FACULTY_ID used for now.
+    # In production: replace with the real faculty ID sent from the frontend.
+    faculty_id = DUMMY_FACULTY_ID
+    config = {"configurable": {"thread_id": faculty_id}}
 
-    # Add college filter to current message if set
+    # ── Append college filter to current question if set ─────────────────────
     current_message = request.message
     if request.college_name:
         current_message += f" (filter to college: {request.college_name})"
 
-    messages.append(HumanMessage(content=current_message))
+    logger.info(f"/chat thread_id='{faculty_id}'")
 
+    # ── Invoke graph ──────────────────────────────────────────────────────────
+    # We no longer pass history from Streamlit — LangGraph loads the full
+    # conversation history from the checkpointer using thread_id automatically.
+    # Only the new HumanMessage needs to be passed each turn.
     try:
-        result = await app.state.graph.ainvoke({"messages": messages})
+        result = await app.state.graph.ainvoke(
+            {
+                "messages":      [HumanMessage(content=current_message)],
+                "user_query":    current_message,
+                # Initialise turn-specific state fields each turn
+                "direct_answer": None,
+            },
+            config=config,
+        )
     except Exception as exc:
         logger.error(f"/chat graph error: {exc}")
         raise HTTPException(status_code=500, detail=str(exc))
 
-    all_messages = result.get("messages", [])
+    # ── Extract answer ────────────────────────────────────────────────────────
+    answer: str = result.get("final_answer") or "No answer returned."
 
-    # Extract the last AI message as the answer
-    answer = ""
-    for msg in reversed(all_messages):
-        if isinstance(msg, AIMessage) and msg.content:
-            answer = msg.content.strip()
-            break
+    # ── Extract data + SQL ────────────────────────────────────────────────────
+    raw_data = result.get("sql_result") or []
+    data     = _safe_convert(raw_data) if raw_data else None
+    sql      = result.get("sql_query")
+    error    = result.get("sql_error")
 
-    if not answer:
-        answer = "No answer returned."
+    # ── Extract intent ────────────────────────────────────────────────────────
+    intent = result.get("domain") or ""
+    if intent == "direct":
+        intent = ""
 
-    # Extract data and sql from tool messages
-    data = None
-    sql = None
-
-    for msg in all_messages:
-        if isinstance(msg, ToolMessage):
-            try:
-                tool_result = json.loads(msg.content)
-                if isinstance(tool_result, dict) and "data" in tool_result:
-                    data = _safe_convert(tool_result.get("data"))
-                    sql  = tool_result.get("sql")
-            except Exception as e:
-                logger.warning(f"[main] ToolMessage parse failed: {e}")
-
-    # Extract intent from AIMessage tool_calls
-    intent = ""
-    for msg in all_messages:
-        if isinstance(msg, AIMessage) and msg.tool_calls:
-            tool_name = msg.tool_calls[0].get("name", "")
-            intent = {
-                "emp_data_tool":    "emp",
-                "pod_data_tool":    "pod",
-                "assess_data_tool": "assess",
-            }.get(tool_name, "")
-
+    logger.info(f"/chat done | thread='{faculty_id}' | intent='{intent}' | rows={len(raw_data)} | error={error}")
 
     return ChatResponse(
         answer=answer,
@@ -133,5 +133,5 @@ async def chat(request: ChatRequest):
         sql=sql,
         sql_chain_count=0,
         previous_intent=None,
-        error=None,
+        error=error,
     )
