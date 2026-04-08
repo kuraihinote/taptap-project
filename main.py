@@ -114,10 +114,18 @@ async def chat(request: ChatRequest):
     answer: str = result.get("final_answer") or "No answer returned."
 
     # ── Extract data + SQL ────────────────────────────────────────────────────
-    raw_data = result.get("sql_result") or []
-    data     = _safe_convert(raw_data) if raw_data else None
-    sql      = result.get("sql_query")
-    error    = result.get("sql_error")
+    domain = result.get("domain")
+    if domain in ("direct", "advice"):
+        raw_data = []
+        data     = None
+        sql      = None
+        error    = None
+        logger.info(f"[chat] domain={domain} — skipping sql_result/sql_query extraction")
+    else:
+        raw_data = result.get("sql_result") or []
+        data     = _safe_convert(raw_data) if raw_data else None
+        sql      = result.get("sql_query")
+        error    = result.get("sql_error")
 
     # ── Extract intent ────────────────────────────────────────────────────────
     intent = result.get("domain") or ""

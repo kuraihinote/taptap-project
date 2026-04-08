@@ -39,7 +39,7 @@ class TapTapState(TypedDict):
     # Conversation history
     messages:         Annotated[Sequence[BaseMessage], add_messages]
     # Supervisor decision
-    domain:           Optional[Literal["pod", "assess", "emp", "direct"]]
+    domain:           Optional[Literal["pod", "assess", "emp", "direct", "advice"]]
     direct_answer:    Optional[str]
     # SQL node output
     sql_query:        Optional[str]
@@ -99,13 +99,31 @@ Return ONLY valid JSON — no markdown, no explanation:
   {"domain": "emp"}
   {"domain": "pod"}
   {"domain": "assess"}
-  {"domain": "direct", "direct_answer": "<answer>"}
+  {"domain": "advice"}
+  {"domain": "direct", "direct_answer": "<your answer here>"}
 
-Use "direct" ONLY when:
-  - Completely unrelated to student analytics → direct, politely decline
-  - Genuinely ambiguous across all three modules with no signal → direct, ask faculty to clarify
-  - When in doubt, always pick the most likely module — never refuse a question about student performance
-  - If the previous domain is known, short follow-ups with no competing module signal should route to the previous domain — never direct
+IMPORTANT: the key must always be "direct_answer" — never "direct", never "answer"
+
+Route to "advice" when:
+  - The faculty is asking what to do, how to help students, or what actions to take
+  - AND data context from a previous result is available (yes)
+  - If data context is NOT available → use "direct" instead
+
+Use "direct" ONLY when the question is clearly outside student analytics:
+
+  ANSWER directly (helpful and concise) if the question is educational or technical:
+  - General knowledge, science, academic concepts: "what is ML", "explain p-value"
+  - Technology, programming, computer science: "what is recursion", "explain REST APIs"
+  - Career or industry concepts: "what is agile", "what does a data scientist do"
+
+  DECLINE politely if the question is about entertainment or recreation:
+  - Movies, music, TV shows, celebrities, sports, games
+
+  NEVER use "direct" for anything about student performance, scores, submissions,
+  assessments, or analytics — always route those to emp, pod, or assess.
+  When in doubt, always pick the most likely module.
+  If the previous domain is known, short follow-ups with no competing module signal
+  should route to the previous domain — never direct.
 """
 
 def supervisor_node(state: TapTapState) -> dict:
@@ -137,9 +155,12 @@ def supervisor_node(state: TapTapState) -> dict:
     prev_domain = state.get("domain")
     prev_domain_text = f"Previous domain used: {prev_domain}\n" if prev_domain else ""
 
+    has_data_context = "yes" if state.get("sql_data_summary") else "no"
+
     user_text = (
         f"Available modules and what they cover:\n{module_context}\n"
         f"{prev_domain_text}"
+        f"Data context from previous result available: {has_data_context}\n"
         f"Conversation so far:\n{history_text}\n\n"
         f"Latest question: {state['user_query']}"
     )
@@ -154,7 +175,7 @@ def supervisor_node(state: TapTapState) -> dict:
 
         parsed = parse_json_markdown(raw)
         domain: str = parsed.get("domain", "direct")
-        direct_answer: str = parsed.get("direct_answer", "")
+        direct_answer: str = parsed.get("direct_answer") or parsed.get("direct", "")
 
     except Exception as e:
         logger.error(f"[supervisor] Failed to parse LLM response: {e}")
@@ -295,14 +316,70 @@ def formatter_node(state: TapTapState) -> dict:
 
 
 # ══════════════════════════════════════════════════════════════════════════════
+# NODE 4 — ADVICE NODE
+# Uses previous SQL result summary to give faculty practical, actionable advice.
+# ══════════════════════════════════════════════════════════════════════════════
+
+_ADVICE_SYSTEM = """You are an academic advisor for college faculty at an edtech platform.
+The faculty has just seen data about their students and is asking for advice or guidance.
+
+Use the provided data context to give specific, practical advice tailored to what the data shows.
+
+RULES:
+- Give 4–6 concise bullet points of actionable advice
+- Base every point on the data provided — do not invent situations
+- Speak directly to the faculty: "Consider...", "You may want to...", "Students who..."
+- Never mention SQL, databases, tables, or technical details
+- Never say "course" — say "difficulty level"
+- Be encouraging and constructive
+"""
+
+def advice_node(state: TapTapState) -> dict:
+    """
+    Uses sql_data_summary from the previous turn to give faculty actionable advice.
+    """
+    question         = state["user_query"]
+    sql_data_summary = state.get("sql_data_summary") or ""
+
+    logger.info(f"[advice] Received question: '{question[:120]}' | sql_data_summary_len={len(sql_data_summary)}")
+
+    user_text = (
+        f"Faculty question: {question}\n\n"
+        f"Data context:\n{sql_data_summary}"
+    )
+
+    try:
+        response = gpt_4o_mini_llm.invoke([
+            SystemMessage(content=_ADVICE_SYSTEM),
+            HumanMessage(content=user_text),
+        ])
+        answer = response.content.strip()
+    except Exception as e:
+        logger.error(f"[advice] LLM error — question='{question[:120]}' | sql_data_summary_len={len(sql_data_summary)} | error={e}")
+        answer = "I couldn't generate advice at this time. Please try again."
+
+    logger.info(f"[advice] Final answer (first 200 chars): {answer[:200]}")
+
+    return {
+        "final_answer":     answer,
+        "sql_data_summary": sql_data_summary,  # preserve for further follow-ups
+        "messages":         [AIMessage(content=answer)],
+    }
+
+
+# ══════════════════════════════════════════════════════════════════════════════
 # ROUTING — after supervisor
 # ══════════════════════════════════════════════════════════════════════════════
 
 def _route_after_supervisor(state: TapTapState) -> str:
-    if state.get("domain") == "direct":
+    domain = state.get("domain")
+    if domain == "direct":
         logger.info("[route] supervisor answered directly → END")
         return END
-    logger.info(f"[route] routing to sql_node for domain='{state['domain']}'")
+    if domain == "advice":
+        logger.info("[route] routing to advice_node — data context available")
+        return "advice_node"
+    logger.info(f"[route] routing to sql_node for domain='{domain}'")
     return "sql_node"
 
 
@@ -328,6 +405,7 @@ async def build_supervisor_graph() -> tuple[Any, Any]:
     workflow.add_node("supervisor",  supervisor_node)
     workflow.add_node("sql_node",    sql_node)
     workflow.add_node("formatter",   formatter_node)
+    workflow.add_node("advice_node", advice_node)
 
     workflow.set_entry_point("supervisor")
 
@@ -335,13 +413,15 @@ async def build_supervisor_graph() -> tuple[Any, Any]:
         "supervisor",
         _route_after_supervisor,
         {
-            "sql_node": "sql_node",
+            "sql_node":   "sql_node",
+            "advice_node": "advice_node",
             END: END,
         },
     )
 
-    workflow.add_edge("sql_node",  "formatter")
-    workflow.add_edge("formatter", END)
+    workflow.add_edge("sql_node",   "formatter")
+    workflow.add_edge("formatter",  END)
+    workflow.add_edge("advice_node", END)
 
     if CHECKPOINT_DB_URL:
         logger.info("[checkpointer] Using AsyncPostgresSaver (stage DB)")
