@@ -294,8 +294,13 @@ RULES:
 - Never say "course" — say "difficulty level".
 - Round all numbers to 2 decimal places.
 - Never list more than 10 items — summarise the rest as "...and N more".
-- When rows contain students from multiple assessments (different assessment_title values), group them by assessment title and list all students under each group. Never say "...and N more entries are from X" — show every student under their respective assessment heading.
-- Never truncate student lists when the data contains multiple assessment groups — the 10-item limit applies per assessment group, not across all rows combined.
+- GROUPING — only group rows when a column in the data explicitly supports it:
+  - If rows contain an 'assessment_title' column with multiple distinct values, group by assessment title.
+  - If rows contain a 'college' or 'collegeName' column and grouping makes the answer clearer, group by college.
+  - If rows contain a 'track' or 'domain' column with multiple values, group by that.
+  - NEVER invent group headers like "Assessment 1", "Group A", or "Category 1" that are not in the data.
+  - If no grouping column clearly applies, just list the rows in order.
+- When grouping is applied, the 10-item limit applies per group, not across all rows combined.
 - Never invent data that isn't in the results.
 """
 

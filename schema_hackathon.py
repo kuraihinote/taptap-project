@@ -1,3 +1,6 @@
+from typing import Never
+
+
 HACKATHON_SCHEMA_CONTEXT = """
 You have access to the following tables for the Hackathon module.
 Use ONLY these tables and columns — do not reference any other tables.
@@ -100,8 +103,8 @@ CRITICAL RULES — ALWAYS FOLLOW
 5. hackathon.domain column is free-text and unreliable — NEVER filter by it.
    Always filter events by h.title ILIKE '%keyword%'.
 
-6. For "this month" or "latest" event queries, do not rely on date filters —
-   use ORDER BY h.start_date DESC LIMIT 1 to get the most recent matching event.
+6. For "this month", "latest", or named month event queries, do not use date range
+   filters — use Pattern 9 instead (subquery with ORDER BY start_date DESC LIMIT 1).
 
 6. Join pattern for leaderboards:
    FROM public.user_hackathon_participation p
@@ -234,5 +237,27 @@ LEFT JOIN public.college c ON c.id = u.college_id
 WHERE (h.title ILIKE '%word1%' AND h.title ILIKE '%word2%')
 GROUP BY c.name
 ORDER BY avg_score DESC
+LIMIT 10;
+
+
+9. LATEST OR MONTH-SPECIFIC EVENT (for "latest", "most recent", "this month", or named month queries):
+-- Never filter by start_date for month-based queries — use ORDER BY start_date DESC
+-- to get the most recent matching event instead of date range filtering.
+SELECT
+    TRIM(u.first_name) || ' ' || TRIM(u.last_name)  AS name,
+    c.name                                            AS college,
+    h.title                                           AS hackathon,
+    p.current_score                                   AS total_score
+FROM public.user_hackathon_participation p
+JOIN public.user u ON u.id = p.user_id
+JOIN public.hackathon h ON h.id = p.hackathon_id
+LEFT JOIN public.college c ON c.id = u.college_id
+WHERE h.id = (
+    SELECT id FROM public.hackathon
+    WHERE (title ILIKE '%word1%' AND title ILIKE '%word2%')
+    ORDER BY start_date DESC
+    LIMIT 1
+)
+ORDER BY p.current_score DESC
 LIMIT 10;
 """
