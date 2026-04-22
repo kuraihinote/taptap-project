@@ -13,7 +13,6 @@ const DOMAIN_META = {
   emp:       { label: "Employability", color: "#3b82f6", bg: "rgba(59,130,246,0.1)" },
   pod:       { label: "POD",           color: "#f97316", bg: "rgba(249,115,22,0.1)" },
   assess:    { label: "Assessment",    color: "#10b981", bg: "rgba(16,185,129,0.1)" },
-  hackathon: { label: "Hackathon",     color: "#a855f7", bg: "rgba(168,85,247,0.1)" },
   direct:    { label: "General",       color: "#f0a500", bg: "rgba(240,165,0,0.1)"  },
   advice:    { label: "Advice",        color: "#ec4899", bg: "rgba(236,72,153,0.1)" },
 };
@@ -22,7 +21,7 @@ const SUGGESTIONS = [
   { icon: "🏆", domain: "emp",       title: "Top performers this month",      prompt: "Who are the top 10 students by employability score this month?" },
   { icon: "🔥", domain: "pod",       title: "POD streak leaders",             prompt: "Which students have the longest POD streaks right now?" },
   { icon: "📋", domain: "assess",    title: "Latest assessment pass rates",   prompt: "Show me pass rates for the latest formal assessments." },
-  { icon: "💡", domain: "hackathon", title: "Hackathon subject breakdown",    prompt: "Break down hackathon scores by subject — aptitude, verbal, and coding." },
+  { icon: "🏆", domain: "assess",    title: "Hackathon top scorers",          prompt: "Show top students in the latest hackathon." },
   { icon: "📊", domain: "emp",       title: "DSA practice pass rates",        prompt: "What is the pass rate for DSA practice questions across all students?" },
   { icon: "🎖️", domain: "pod",      title: "Badge and coin leaders",         prompt: "Who has earned the most badges and coins on Problem of the Day?" },
 ];

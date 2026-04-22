@@ -25,7 +25,6 @@ from analytics import _generate_and_run
 from schema_emp      import EMP_SCHEMA_CONTEXT
 from schema_pod      import POD_SCHEMA_CONTEXT
 from schema_assess   import ASSESS_SCHEMA_CONTEXT
-from schema_hackathon import HACKATHON_SCHEMA_CONTEXT
 from constants import CHECKPOINT_DB_URL
 from logger import logger
 
@@ -40,7 +39,7 @@ class TapTapState(TypedDict):
     # Conversation history
     messages:         Annotated[Sequence[BaseMessage], add_messages]
     # Supervisor decision
-    domain:           Optional[Literal["pod", "assess", "emp", "direct", "advice", "hackathon"]]
+    domain:           Optional[Literal["pod", "assess", "emp", "direct", "advice"]]
     direct_answer:    Optional[str]
     # SQL node output
     sql_query:        Optional[str]
@@ -60,7 +59,6 @@ DOMAIN_SCHEMAS: dict[str, str] = {
     "emp":       EMP_SCHEMA_CONTEXT,
     "pod":       POD_SCHEMA_CONTEXT,
     "assess":    ASSESS_SCHEMA_CONTEXT,
-    "hackathon": HACKATHON_SCHEMA_CONTEXT,
 }
 
 
@@ -83,21 +81,12 @@ pod — Problem of the Day: daily challenges, who solved today, streaks, streak 
 who lost their streak, badges, coins, fastest solver, difficulty levels (easy/medium/hard),
 POD types (coding/aptitude/verbal), college rankings by POD activity.
 
-assess — Formal Assessments: ONLY for specific named tests with formal titles
-(e.g. "Backend Developer - DSA in C", "TCS NQT", "MET Round 1"). If the question
-mentions a subject like Data Structures, Python, or Algorithms without a formal test
-name → it is emp, not assess. Use for: shortlisted students, submission results for
-a specific named test, MET (Monthly Employability Test), profiling tests, skill tests,
-completion rates.
-
-hackathon — Hackathon / Skill Tests: named hackathon events, skill assessments,
-employability tests, placement mock tests (e.g. TCS Placement Mock, Autosprint
-Employability Test, Monthly Hackathon, MERN Stack Grand Test), profiling tests.
-Use for: top scorers in a specific named test, subject-level performance (verbal,
-aptitude, MCQ, coding), student score in a named test, completion rates for a test.
-NOT for: POD challenges (use pod), domain practice questions (use emp), formal
-recruitment assessments in gest schema (use assess).
-NOTE: TCS Placement Mock Tests exist here. TCS NQT does NOT exist in the DB at all.
+assess — All formal assessments — hackathons, hackathon events, coding competitions,
+placement mock tests, named custom assessments (company-specific tests, Smart Interviews,
+Unified Assessment Library, recruiter tests), skill tests, MET (Monthly Employability Test),
+profiling tests, FDP program tests, BB Screening, Daily Tests. Use for: top scorers in a
+named test/event, shortlisted students, who submitted vs who didn't, pass rates, skill
+breakdowns, subdomain accuracy, round-wise scores, monthly MET bands, completion rates.
 
 Your only job: read the question AND the conversation history, then return which
 module it belongs to. Use the conversation history to understand follow-up questions
@@ -122,7 +111,6 @@ Return ONLY valid JSON — no markdown, no explanation:
   {"domain": "emp"}
   {"domain": "pod"}
   {"domain": "assess"}
-  {"domain": "hackathon"}
   {"domain": "advice"}
 
 Route to "advice" if the faculty is asking what to do, how to help, how to improve,
@@ -138,7 +126,6 @@ Return ONLY valid JSON — no markdown, no explanation:
   {"domain": "emp"}
   {"domain": "pod"}
   {"domain": "assess"}
-  {"domain": "hackathon"}
   {"domain": "direct", "direct_answer": "<your answer here>"}
 
 Route to "direct" ONLY when the question is clearly outside student analytics:
@@ -176,7 +163,6 @@ def supervisor_node(state: TapTapState) -> dict:
         f"emp: {EMP_SCHEMA_CONTEXT[:600]}\n\n"
         f"pod: {POD_SCHEMA_CONTEXT[:600]}\n\n"
         f"assess: {ASSESS_SCHEMA_CONTEXT[:600]}\n\n"
-        f"hackathon: {HACKATHON_SCHEMA_CONTEXT[:600]}\n\n"
     )
 
     prev_domain = state.get("domain")
