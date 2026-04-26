@@ -11,7 +11,7 @@ from sqlalchemy import text
 from db import get_db
 from logger import logger
 from constants import SQL_MAX_ROWS
-from models import gpt_4o_mini_llm as _llm
+from models import gpt_4o_llm as _llm
 
 
 
@@ -42,14 +42,28 @@ RULES:
 10. For relative date expressions ("today", "this week", "this month", "last month", etc.),
     use PostgreSQL date functions (DATE_TRUNC, CURRENT_DATE, INTERVAL) to compute the
     correct date range dynamically. Never hardcode specific dates.
-11. If the question cannot be answered from the given schema, return exactly: UNSUPPORTED
-11. Never expose passwords, tokens, or internal system columns.
+11. For questions asking for recommendations, action plans, or next steps based on
+    performance — fetch topic/subdomain-level weak area data so recommendations can
+    reference specific topics rather than broad skills.
+    Never return UNSUPPORTED for action/recommendation questions — always fetch
+    the most granular performance data available to generate specific advice.
+12. Never expose passwords, tokens, or internal system columns.
+13. For "latest" or "most recent" event queries, use ORDER BY date DESC LIMIT 1
+    to find the most recent event regardless of participation status — never skip
+    events because they have 0 participants.
+    For gest assessments, "latest" means ORDER BY created_at DESC — never filter
+    by close_time or open_time, as this excludes closed assessments.
 
 CRITICAL — STANDARD PATTERNS:
-The schema context contains STANDARD QUERY PATTERNS. These are mandatory templates.
-If the faculty question matches one of these patterns (profile, top scorers, pass rate, recent activity),
-you MUST use that exact pattern as your base — only substitute the specific filters/values.
-DO NOT invent a different SQL structure for these known query types.
+The schema context contains STANDARD QUERY PATTERNS. These are fast-lane templates,
+not a whitelist. Use them as follows:
+- If the faculty question matches a known pattern → use that pattern as your base,
+  substituting only the specific filters/values.
+- If NO pattern matches → reason from the schema columns directly and write correct
+  SQL from scratch. Use any valid PostgreSQL features the schema supports (UNNEST for
+  arrays, CTEs, window functions, JSONB operators, etc.).
+DO NOT invent a different SQL structure when a matching pattern exists.
+DO NOT return UNSUPPORTED just because no pattern matches — write the SQL yourself.
 """
 
 _SQL_USER_TEMPLATE = """Schema:
@@ -101,6 +115,26 @@ def _validate_sql(sql: str) -> tuple[bool, str]:
             f"Query rejected: {join_count} JOIN(s) but only {on_using_count} ON/USING clause(s). "
             "Possible cartesian product — ensure every JOIN has an ON or USING condition."
         )
+
+    # ── Large table scan guard ────────────────────────────────────────────────
+    # hackathon_final_attempt_submission has ~24M rows.
+    # Any query against it without a hackathon_id or test_type_id filter will time out.
+    # Detect this and return a scoping error so the formatter can ask faculty to narrow down.
+    sql_normalized = sql.upper().replace(" ", "").replace("\n", "")
+    if "HACKATHON_FINAL_ATTEMPT_SUBMISSION" in sql_normalized:
+        has_hackathon_id_filter = "HACKATHON_ID" in sql_normalized
+        has_test_type_id_filter = "TEST_TYPE_ID" in sql_normalized
+        if not has_hackathon_id_filter and not has_test_type_id_filter:
+            logger.warning(
+                f"[validate_sql] Rejected — hackathon_final_attempt_submission queried "
+                f"without hackathon_id or test_type_id filter | sql_preview={sql[:120]}"
+            )
+            return False, (
+                "SCOPE_REQUIRED: topic and skill breakdown queries require a specific assessment "
+                "or test type to run efficiently. Please ask the faculty to narrow down — "
+                "e.g. 'which topics are students failing in the latest MET?' or "
+                "'skill breakdown for the latest hackathon?'"
+            )
 
     # Inject LIMIT if missing
     if "LIMIT" not in sql.upper():
@@ -159,6 +193,7 @@ def _generate_and_run(question: str, schema_context: str) -> dict[str, Any]:
     # Step 2: Validate
     is_valid, result = _validate_sql(raw_sql)
     if not is_valid:
+        logger.warning(f"[validate_sql] Rejected | reason={result[:80]} | sql_preview={raw_sql[:80]}")
         return {"data": [], "sql": raw_sql, "error": result}
 
     validated_sql = result
@@ -201,5 +236,3 @@ def _generate_and_run(question: str, schema_context: str) -> dict[str, Any]:
         except Exception as second_err:
             logger.error(f"[sql_exec] self-heal failed: {second_err}")
             return {"data": [], "sql": validated_sql, "error": str(first_err)}
-
-

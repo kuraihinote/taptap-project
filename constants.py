@@ -44,9 +44,20 @@ AZURE_GPT4O_MINI_CONFIG = {
     "azure_endpoint":  os.getenv("AZURE_OPENAI_ENDPOINT"),
     "deployment_name": os.getenv("AZURE_OPENAI_DEPLOYMENT"),
 }
-
+ 
 if not all(AZURE_GPT4O_MINI_CONFIG.values()):
     raise Exception("Azure OpenAI config details not found in environment variables.")
+ 
+ 
+AZURE_GPT4O_CONFIG = {
+    "api_key":         os.getenv("AZURE_OPENAI_API_KEY5"),
+    "api_version":     os.getenv("AZURE_OPENAI_API_VERSION5"),
+    "azure_endpoint":  os.getenv("AZURE_OPENAI_ENDPOINT5"),
+    "deployment_name": os.getenv("AZURE_OPENAI_DEPLOYMENT5"),
+}
+ 
+if not all(AZURE_GPT4O_CONFIG.values()):
+    raise Exception("Azure OpenAI GPT-4o config not found in environment variables.")
 
 
 # ── Domain intents ────────────────────────────────────────────────────────────

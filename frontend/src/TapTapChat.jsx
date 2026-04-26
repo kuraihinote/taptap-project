@@ -97,9 +97,15 @@ function renderMarkdown(text) {
     // Numbered list
     if (line.match(/^\d+\. /)) {
       const items = [];
-      while (i < lines.length && lines[i].match(/^\d+\. /)) {
-        items.push(<li key={i} style={{ marginBottom: 3 }}>{inlineFormat(lines[i].replace(/^\d+\. /, ""))}</li>);
-        i++;
+      while (i < lines.length) {
+        if (lines[i].match(/^\d+\. /)) {
+          items.push(<li key={i} style={{ marginBottom: 3 }}>{inlineFormat(lines[i].replace(/^\d+\. /, ""))}</li>);
+          i++;
+        } else if (lines[i].trim() === "" && lines[i+1]?.match(/^\d+\. /)) {
+          i++; // skip blank lines between numbered items
+        } else {
+          break;
+        }
       }
       out.push(<ol key={`ol${i}`} style={{ paddingLeft: 18, margin: "6px 0", lineHeight: 1.7 }}>{items}</ol>);
       continue;

@@ -31,30 +31,23 @@ CRITICAL DECISION RULE — WHICH TABLE FAMILY TO USE
 Read the faculty's question and pick ONE of two systems:
 
   A. HACKATHON tables (public.hackathon + public.user_hackathon_participation)
-     Use when the question mentions ANY named test or event — including:
-     - "hackathon", "hackathon event", any specific event name
-     - "MET", "Monthly Employability Test", "monthly hackathon assessment" → test_type_id = 6
-     - "profiling test"        → test_type_id = 54
-     - "daily test"            → test_type_id = 13
-     - "BB Screening"          → test_type_id = 17
-     - "weekly test"           → test_type_id = 43
-     - "placement test"        → test_type_id = 63
-     - "coding challenge"      → test_type_id = 62
-     - "TCS Placement Mock", "placement preparation", "industry hackathon"
-     - Round-wise performance, skill bands (coding/aptitude/english), subdomain accuracy
-     Always use test_type_id filter when the category is clear. Combine with title keywords
-     when faculty names a specific event within a category.
+     Use when the question mentions ANY named test or event where students participate —
+     hackathons, weekly tests, daily tests, profiling tests, MET, placement mocks,
+     screening tests, coding challenges, or any other event-style assessment.
+     Use the test_type_id routing guide below to apply the correct filter.
+     Always use test_type_id filter when the category is clear.
 
   B. GEST custom assessment tables (gest.assessment_shortlist + gest.assessment_final_attempt_submission)
-     Use when the question mentions:
-     - Specific named custom assessments (e.g. "Backend Developer - DSA in C",
-       "Smart Interview", "Unified Assessment Library", "Web Development")
-     - "Custom Assessment", "FDP Program", "Recruiter Technical", "Recruiter Business management"
-     - Shortlisted students (who was shortlisted for an assessment)
-     - Assessment rounds (Round 1, Round 2), round-wise completion
+     Use ONLY when the question involves shortlisting — where specific students are
+     selected/invited for a recruitment-style assessment. Key signals:
+     - "who was shortlisted", "shortlisted students", "didn't submit after shortlisting"
+     - Named role-based assessments: "Backend Developer - DSA in C", "Smart Interview",
+       "Unified Assessment Library", "Web Development test"
+     - Assessment rounds (Round 1, Round 2) for recruitment pipelines
 
-  If ambiguous: if the question names a specific event/test with participants → System A.
-  If it mentions shortlisting or recruitment-style custom tests → System B.
+  If ambiguous: the key distinction is SHORTLISTING. If the question involves students
+  being selected/invited for a test → System B. If it's an open participation event
+  where any student can attempt → System A.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 SYSTEM A — HACKATHON TABLES
@@ -100,6 +93,12 @@ ROUTING GUIDE — which test_type_id to use based on faculty's question:
     "industry hackathon" / "company hackathon"                            → test_type_id = 3 or 19
     General named event with no category signal                           → filter by h.title ILIKE only
 
+CRITICAL — "LATEST" EVENT SUBQUERY:
+When faculty asks for "latest" or "most recent" test of any category, the subquery
+MUST join to user_hackathon_participation and use HAVING COUNT > 0 to skip empty events.
+See Pattern A7 and A10 for the correct subquery structure — always follow that same
+structure regardless of which test_type_id is being filtered.
+
 NOTE: There is NO allowed_colleges column. College filtering must go via public.user → public.college.
 NOTE: Always prefer test_type_id filter over title keywords when the category is clear from
       the faculty's question. Combine both when faculty mentions both a category and a name.
@@ -127,6 +126,11 @@ KEY FACTS:
         each object has: status, roundId, difficulty, subDomain (array), totalScore, questionScore, questionType
 
 -- Per-question submission detail (use for skill/difficulty breakdown at question level)
+-- PERFORMANCE WARNING: This table has ~24 million rows.
+-- ALWAYS filter by hackathon_id or test_type_id FIRST — never query without a WHERE filter.
+-- Unfiltered queries will time out. Every query MUST include one of:
+--   WHERE f.hackathon_id = (SELECT id FROM public.hackathon WHERE ...)
+--   WHERE f.test_type_id = <id>
 public.hackathon_final_attempt_submission (
     id                   INTEGER
     user_id              VARCHAR     -- FK to public.user.id (direct)
@@ -139,10 +143,28 @@ public.hackathon_final_attempt_submission (
     status               TEXT        -- 'pass' or 'fail'
     question_type        TEXT        -- 'mcq', 'coding', 'subjective'
     skill                TEXT        -- 'Aptitude', 'Coding', 'English' — only on this table
-    question_sub_domain  TEXT[]      -- array e.g. ['Percentages'], ['Arrays']
+    question_sub_domain  TEXT[]      -- array of topic tags e.g. ['Percentages'], ['Arrays']
+                                     -- expand with: UNNEST(f.question_sub_domain) AS topic
+                                     -- do NOT use jsonb_array_elements — this is a TEXT[] not JSONB
     difficulty           TEXT        -- 'easy', 'medium', 'hard'
     time_taken           BIGINT      -- milliseconds
 )
+
+-- Proctoring violations per student per hackathon
+public.hackathon_proctoring_violation (
+    id                    INTEGER
+    hackathon_id          INTEGER     -- FK to public.hackathon.id
+    round_id              INTEGER     -- FK to public.round_with_score.id
+    user_id               VARCHAR     -- FK to public.user.id (direct)
+    type                  VARCHAR     -- violation type:
+                                     --   'RightClick', 'FullScreenExit', 'Copy',
+                                     --   'Paste', 'Cut', 'DevToolsAccess'
+    violation_capture_url VARCHAR     -- screenshot URL (do not expose in output)
+)
+NOTE: Join to public.hackathon via hackathon_id, to public.user via user_id.
+NOTE: Multiple rows per student per violation — use COUNT(DISTINCT user_id) for student counts.
+NOTE: 'FullScreenExit' and 'RightClick' are most common — not necessarily intentional cheating.
+      'DevToolsAccess', 'Copy', 'Paste' are stronger signals of integrity concern.
 
 -- Round definitions for hackathons (needed for per-round normalization)
 public.round_with_score (
@@ -232,6 +254,8 @@ HACKATHON:
     hackathon_final_attempt_submission → public.user        via f.user_id = u.id
     hackathon_final_attempt_submission → public.hackathon   via f.hackathon_id = h.id
     round_with_score → public.hackathon                     via r.hackathon_id = h.id
+    hackathon_proctoring_violation → public.hackathon       via v.hackathon_id = h.id
+    hackathon_proctoring_violation → public.user            via v.user_id = u.id
 
 GEST:
     assessment_final_attempt_submission → assessment_shortlist  via s.assessment_id = a.id::text
@@ -401,8 +425,9 @@ LIMIT 10
 PATTERN A7 — LATEST / MOST RECENT HACKATHON LEADERBOARD:
 -- For "latest hackathon", "most recent event" — never use date range filters.
 -- Instead pick the most recent event WITH ACTUAL PARTICIPANTS.
--- CRITICAL: Always filter via HAVING COUNT > 0 — some events in the DB have 0
--- participants and should never be returned as "latest".
+-- CRITICAL: The subquery MUST include JOIN + HAVING COUNT > 0 — without this it will
+-- pick empty/future events. NEVER simplify to just ORDER BY start_date DESC LIMIT 1.
+-- For test-type-specific "latest" queries (MET, profiling, weekly etc.) use Pattern A10/A10b.
 SELECT
     (TRIM(u.first_name) || ' ' || TRIM(u.last_name)) AS name,
     c.name AS college,
@@ -428,9 +453,10 @@ NOTE: When faculty specifies a title keyword (e.g. "latest MVSR hackathon"), add
       AND (h2.title ILIKE '%word1%' AND h2.title ILIKE '%word2%') inside the subquery WHERE.
 
 PATTERN A8 — SUBDOMAIN ACCURACY FROM JSONB (advanced, for weak-area analysis):
--- Use ONLY when faculty asks about specific subdomains (e.g. "Percentages", "Arrays",
--- "Listening Comprehension") or weak areas within hackathon skills.
--- Uses the JSONB report field, requires unnest of the subDomain array.
+-- Use ONLY when faculty names a SPECIFIC hackathon event by title.
+-- DO NOT use for general topic/weak-area questions with no named event — use Pattern A8b instead.
+-- DO NOT use jsonb_array_elements on question_sub_domain — that column is TEXT[], not JSONB.
+-- This pattern reads from user_hackathon_participation.report JSONB field only.
 WITH expanded_questions AS (
     SELECT
         uhp.user_id,
@@ -457,6 +483,116 @@ ORDER BY accuracy_percent ASC
 LIMIT 20
 NOTE: accuracy_percent < 40 is Weak, 40-59 is Moderate, 60-79 is Strong, >=80 is Very Strong.
 
+PATTERN A8b — TOPIC / SUB-DOMAIN WEAK AREAS (uses question_sub_domain TEXT[] column):
+-- Use when faculty asks about topics, sub-domains, or weak/strong areas for a specific event.
+-- Source: question_sub_domain TEXT[] on hackathon_final_attempt_submission.
+-- CRITICAL: Use UNNEST() — never jsonb_array_elements or jsonb_array_elements_text.
+-- question_sub_domain is TEXT[], not JSONB. Pattern A8 uses JSONB and is for named events only.
+-- PERFORMANCE: Always use WHERE hackathon_id = (subquery) — never a CTE JOIN pattern.
+-- The direct WHERE subquery hits the (hackathon_id, user_id) index and returns fast.
+-- Add h.test_type_id filter inside subquery if faculty specifies a test category.
+-- Add h.title ILIKE filter inside subquery if faculty names a specific event.
+SELECT
+    UNNEST(f.question_sub_domain) AS topic,
+    COUNT(*) AS total_attempts,
+    COUNT(CASE WHEN f.status = 'pass' THEN 1 END) AS passed,
+    ROUND(COUNT(CASE WHEN f.status = 'pass' THEN 1 END) * 100.0
+          / NULLIF(COUNT(*), 0), 2) AS pass_rate_percent
+FROM public.hackathon_final_attempt_submission f
+WHERE f.question_sub_domain IS NOT NULL
+  AND f.hackathon_id = (
+      SELECT h.id FROM public.hackathon h
+      JOIN public.user_hackathon_participation p ON p.hackathon_id = h.id
+      -- AND h.test_type_id = <id>       -- add if faculty specifies a test type
+      -- AND h.title ILIKE '%keyword%'    -- add if faculty names a specific event
+      GROUP BY h.id, h.start_date
+      HAVING COUNT(DISTINCT p.user_id) > 0
+      ORDER BY h.start_date DESC
+      LIMIT 1
+  )
+GROUP BY topic
+ORDER BY pass_rate_percent ASC
+LIMIT 50
+NOTE: Order ASC surfaces weakest topics first. Same accuracy bands as A8 apply.
+NOTE: WHERE hackathon_id = (subquery) is mandatory — it uses the DB index and is fast.
+NOTE: Do not use a CTE + JOIN to pass hackathon_id — PostgreSQL cannot push it to the index.
+
+PATTERN A8c — PROCTORING VIOLATIONS / ACADEMIC INTEGRITY FOR A NAMED EVENT:
+-- Use when faculty asks about cheating, violations, integrity, tab switches, copy-paste,
+-- DevTools access, or any suspicious behaviour during a test.
+-- Violation types: 'RightClick', 'FullScreenExit', 'Copy', 'Paste', 'Cut', 'DevToolsAccess'
+-- DevToolsAccess, Copy, Paste are stronger integrity signals than RightClick or FullScreenExit.
+-- Always use COUNT(DISTINCT v.user_id) for student counts — multiple rows per student per type.
+-- For a named event: filter by h.title ILIKE. For latest event: use the standard subquery.
+SELECT
+    (TRIM(u.first_name) || ' ' || TRIM(u.last_name)) AS name,
+    u.email,
+    c.name AS college,
+    COUNT(*) AS total_violations,
+    COUNT(DISTINCT v.type) AS violation_types,
+    STRING_AGG(DISTINCT v.type, ', ') AS violation_types_list
+FROM public.hackathon_proctoring_violation v
+JOIN public.user u ON u.id = v.user_id
+JOIN public.hackathon h ON h.id = v.hackathon_id
+LEFT JOIN public.college c ON c.id = u.college_id
+WHERE u.role = 'Student'
+  AND (h.title ILIKE '%word1%' AND h.title ILIKE '%word2%')
+  -- AND v.type IN ('DevToolsAccess', 'Copy', 'Paste')  -- uncomment for high-risk only
+GROUP BY u.id, u.first_name, u.last_name, u.email, c.name
+ORDER BY total_violations DESC
+LIMIT 50
+NOTE: To get a summary count instead of per-student list, GROUP BY v.type and COUNT(DISTINCT user_id).
+NOTE: Do not expose violation_capture_url in any output.
+
+PATTERN A8d — SCORE BAND DISTRIBUTION FOR A NAMED HACKATHON EVENT:
+-- Use when faculty asks about band distribution, placement readiness, A++/A+/A/B/C breakdown,
+-- score tiers, or how many students are placement-ready for a specific event.
+-- Bands are computed dynamically from current_score / SUM(round_with_score.score):
+--   A++ = >=80%  | A+ = 60-79%  | A = 40-59%  | B = 30-39%  | C = <30%
+-- For a named event: filter by h.title ILIKE. For latest event: use the standard subquery.
+-- IMPORTANT: JOIN round_with_score to get max possible score — never hardcode it.
+WITH max_score AS (
+    SELECT hackathon_id, SUM(score) AS total_max
+    FROM public.round_with_score
+    WHERE hackathon_id = (
+        SELECT h.id FROM public.hackathon h
+        JOIN public.user_hackathon_participation p ON p.hackathon_id = h.id
+        WHERE (h.title ILIKE '%word1%' AND h.title ILIKE '%word2%')
+        GROUP BY h.id, h.start_date
+        HAVING COUNT(DISTINCT p.user_id) > 0
+        ORDER BY h.start_date DESC
+        LIMIT 1
+    )
+    GROUP BY hackathon_id
+)
+SELECT
+    CASE
+        WHEN ROUND(p.current_score * 100.0 / NULLIF(m.total_max, 0), 2) >= 80 THEN 'A++'
+        WHEN ROUND(p.current_score * 100.0 / NULLIF(m.total_max, 0), 2) >= 60 THEN 'A+'
+        WHEN ROUND(p.current_score * 100.0 / NULLIF(m.total_max, 0), 2) >= 40 THEN 'A'
+        WHEN ROUND(p.current_score * 100.0 / NULLIF(m.total_max, 0), 2) >= 30 THEN 'B'
+        ELSE 'C'
+    END AS band,
+    COUNT(DISTINCT p.user_id) AS student_count,
+    ROUND(COUNT(DISTINCT p.user_id) * 100.0 / NULLIF(SUM(COUNT(DISTINCT p.user_id)) OVER (), 0), 2) AS pct_of_total
+FROM public.user_hackathon_participation p
+JOIN public.hackathon h ON h.id = p.hackathon_id
+JOIN max_score m ON m.hackathon_id = p.hackathon_id
+JOIN public.user u ON u.id = p.user_id
+WHERE u.role = 'Student'
+  AND (h.title ILIKE '%word1%' AND h.title ILIKE '%word2%')
+GROUP BY
+    CASE
+        WHEN ROUND(p.current_score * 100.0 / NULLIF(m.total_max, 0), 2) >= 80 THEN 'A++'
+        WHEN ROUND(p.current_score * 100.0 / NULLIF(m.total_max, 0), 2) >= 60 THEN 'A+'
+        WHEN ROUND(p.current_score * 100.0 / NULLIF(m.total_max, 0), 2) >= 40 THEN 'A'
+        WHEN ROUND(p.current_score * 100.0 / NULLIF(m.total_max, 0), 2) >= 30 THEN 'B'
+        ELSE 'C'
+    END
+ORDER BY MIN(p.current_score * 100.0 / NULLIF(m.total_max, 0)) DESC
+NOTE: For per-student band list instead of summary, remove GROUP BY band and SELECT band per student.
+NOTE: Band cutoffs match BlackBucks platform standard — A++ >= 80%, A+ >= 60%, A >= 40%, B >= 30%, C < 30%.
+
 PATTERN A9 — PARTICIPATION RATE FOR A NAMED HACKATHON:
 SELECT
     h.title AS hackathon,
@@ -474,6 +610,8 @@ PATTERN A10 — MET / MONTHLY EMPLOYABILITY TEST LEADERBOARD (latest month):
 -- MET = hackathons with test_type_id = 6. Both the outer query AND subquery must filter
 -- by test_type_id = 6 — this is what distinguishes MET from regular hackathons.
 -- "Latest MET" = most recent hackathon with test_type_id = 6 that has participants.
+-- CRITICAL: The subquery MUST include JOIN + HAVING COUNT > 0 — without this it will
+-- pick empty events. Never simplify the subquery to just ORDER BY start_date DESC LIMIT 1.
 SELECT
     (TRIM(u.first_name) || ' ' || TRIM(u.last_name)) AS name,
     c.name AS college,
@@ -491,6 +629,47 @@ WHERE u.role = 'Student'
       FROM public.hackathon h2
       JOIN public.user_hackathon_participation p2 ON p2.hackathon_id = h2.id
       WHERE h2.test_type_id = 6
+      GROUP BY h2.id, h2.start_date
+      HAVING COUNT(DISTINCT p2.user_id) > 0
+      ORDER BY h2.start_date DESC
+      LIMIT 1
+  )
+  -- AND c.name ILIKE '%college_keyword%'   -- uncomment for college filter
+ORDER BY p.current_score DESC
+LIMIT 50
+
+PATTERN A10b — LATEST EVENT BY TEST TYPE (profiling, weekly, daily, placement, BB Screening etc.):
+-- Use this pattern for ALL "latest X test" queries where X maps to a test_type_id.
+-- Replace <TYPE_ID> with the correct test_type_id from the routing guide above.
+-- CRITICAL: The subquery MUST include JOIN + HAVING COUNT > 0 — without this it will
+-- pick empty/future events. NEVER simplify to just WHERE + ORDER BY start_date DESC LIMIT 1.
+-- WRONG subquery (will return empty events):
+--   SELECT h2.id FROM public.hackathon h2 WHERE h2.test_type_id = <TYPE_ID>
+--   ORDER BY h2.start_date DESC LIMIT 1
+-- CORRECT subquery (always use this):
+--   SELECT h2.id FROM public.hackathon h2
+--   JOIN public.user_hackathon_participation p2 ON p2.hackathon_id = h2.id
+--   WHERE h2.test_type_id = <TYPE_ID>
+--   GROUP BY h2.id, h2.start_date
+--   HAVING COUNT(DISTINCT p2.user_id) > 0
+--   ORDER BY h2.start_date DESC LIMIT 1
+SELECT
+    (TRIM(u.first_name) || ' ' || TRIM(u.last_name)) AS name,
+    c.name AS college,
+    h.title AS test_title,
+    h.start_date,
+    p.current_score AS total_score
+FROM public.user_hackathon_participation p
+JOIN public.user u ON u.id = p.user_id
+JOIN public.hackathon h ON h.id = p.hackathon_id
+LEFT JOIN public.college c ON c.id = u.college_id
+WHERE u.role = 'Student'
+  AND h.test_type_id = <TYPE_ID>             -- replace with correct test_type_id
+  AND h.id = (
+      SELECT h2.id
+      FROM public.hackathon h2
+      JOIN public.user_hackathon_participation p2 ON p2.hackathon_id = h2.id
+      WHERE h2.test_type_id = <TYPE_ID>      -- same value as above
       GROUP BY h2.id, h2.start_date
       HAVING COUNT(DISTINCT p2.user_id) > 0
       ORDER BY h2.start_date DESC
@@ -674,12 +853,14 @@ LIMIT 50
 PATTERN B7 — INDIVIDUAL STUDENT RESULT IN AN ASSESSMENT:
 SELECT
     (TRIM(u.first_name) || ' ' || TRIM(u.last_name)) AS student_name,
+    c.name AS college,
     a.assessment_title AS assessment,
     s.question_type, s.skill, s.difficulty,
     s.language, s.status, s.obtained_score, s.question_score,
     s.submission_time
 FROM gest.assessment_final_attempt_submission s
 JOIN public.user u ON u.id = s.user_id
+LEFT JOIN public.college c ON c.id = u.college_id
 JOIN gest.assessment_shortlist a ON a.id::text = s.assessment_id
 WHERE (TRIM(u.first_name) || ' ' || TRIM(u.last_name)) ILIKE '%name%'
 ORDER BY s.submission_time DESC

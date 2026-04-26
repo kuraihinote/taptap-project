@@ -274,7 +274,7 @@ Write a clear, concise, human-friendly answer.
 
 RULES:
 - Use 2–5 bullet points for multiple rows. For a single value, one sentence is fine.
-- If the database result has zero rows, say: "No data found. Try being more specific or check the filters."
+- If the database result has zero rows, say: "No data found. The event or assessment may exist but have no participants yet, or the filters may not match any records. Try refining your search."
 - CRITICAL: If the database result has more than 0 rows, you MUST present the data regardless of what the values look like. Never say "No data found" when rows are present. Zero scores, null values, empty strings — all must be presented as-is.
 - Never mention SQL, databases, tables, or technical details.
 - Never say "course" — say "difficulty level".
@@ -309,6 +309,21 @@ def formatter_node(state: TapTapState) -> dict:
             "or the metric you're looking for."
         )
         logger.info(f"[formatter] UNSUPPORTED query — returning guidance message | domain='{domain}'")
+        return {
+            "final_answer":     answer,
+            "sql_data_summary": "",
+            "messages":         [AIMessage(content=answer)],
+        }
+
+    if sql_error and sql_error.startswith("SCOPE_REQUIRED"):
+        answer = (
+            "That question covers too much data to run in real time. "
+            "Could you narrow it down a little? For example:\n"
+            "- \"Which topics are students failing in the latest MET?\"\n"
+            "- \"Skill breakdown for the latest hackathon?\"\n"
+            "- \"Weak areas in the most recent weekly test?\""
+        )
+        logger.info(f"[formatter] SCOPE_REQUIRED — returning scoping guidance | domain='{domain}'")
         return {
             "final_answer":     answer,
             "sql_data_summary": "",

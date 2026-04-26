@@ -135,6 +135,8 @@ public.domains (
     id     INTEGER
     domain VARCHAR  -- e.g. 'Data Structures', 'Python', 'Algorithms'
 )
+NOTE: domain_id=1 maps to 'All' — a catch-all bucket with no specific topic.
+Always exclude it when querying domain breakdowns: WHERE d.domain != 'All'
 
 -- Sub-domain lookup (3,344 rows)
 public.question_sub_domain (
@@ -344,7 +346,8 @@ JOIN public.domains d ON d.id = ets.domain_id
 JOIN public.question_sub_domain qsd ON qsd.id = ets.sub_domain_id
 JOIN public."user" u ON u.id = ets.user_id
 WHERE u.role = 'Student'
-  AND (d.domain ILIKE '%keyword%')
+  AND d.domain != 'All'                   -- always exclude the catch-all domain bucket
+  AND (d.domain ILIKE '%keyword%')        -- remove this line if no domain filter needed
 GROUP BY d.domain, qsd.name
 ORDER BY pass_rate_percent ASC
 LIMIT 20
