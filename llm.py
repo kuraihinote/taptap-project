@@ -471,6 +471,9 @@ def formatter_node(state: TapTapState) -> dict:
         sample_rows = data[:4]
         sql_data_summary = (
             f"Previous question: {question}\n"
+            f"IMPORTANT: The previous question was scoped to a specific college/filter. "
+            f"Any follow-up question must apply the SAME college and context filters "
+            f"from the previous question unless the faculty explicitly changes them.\n"
             f"Previous result sample (4 rows):\n{json.dumps(sample_rows, indent=2)}"
         )
         logger.info(f"[formatter] Generated sql_data_summary ({len(sql_data_summary)} chars)")

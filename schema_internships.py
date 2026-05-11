@@ -131,8 +131,11 @@ public.hackathon (
     test_type_id             INTEGER     -- type of test
     domain                   VARCHAR     -- UNRELIABLE free-text — NEVER filter by this
 )
-⚠️  CRITICAL: public.hackathon has NO "name" column and NO "points" column and NO "date_of_event" column.
-   Always use h.title for the assessment name. Use h.start_date for the event date.
+⚠️  CRITICAL: public.hackathon has NO "name" column. NO "points" column. NO "date_of_event" column.
+   NEVER use h.points, h.name, or h.date_of_event — they will cause a query error.
+   ✅ Use h.title for assessment name.
+   ✅ Use h.start_date for event date.
+   ✅ Use hackathon_with_score.score for max points.
 
 -- Domain <-> Batch join table (M:M)
 -- batch_id references report.batch -- the SAME table used by the trainings domain

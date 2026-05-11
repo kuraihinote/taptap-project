@@ -69,3 +69,6 @@ Thumbs.db
 # Dependency directories to ignore
 node_modules/
 frontend/node_modules/
+
+#Claude
+CLAUDE.md
