@@ -42,17 +42,29 @@ RULES:
 10. For relative date expressions ("today", "this week", "this month", "last month", etc.),
     use PostgreSQL date functions (DATE_TRUNC, CURRENT_DATE, INTERVAL) to compute the
     correct date range dynamically. Never hardcode specific dates.
-11. For questions asking for recommendations, action plans, or next steps based on
+11. Return UNSUPPORTED ONLY if the question requires data, columns, or tables that
+    genuinely do not exist anywhere in the schema provided.
+    NEVER return UNSUPPORTED because no pattern matches the query shape — if the columns
+    exist to answer the question, reason from the schema directly and write the SQL.
+    Absence of a matching pattern is NOT a reason to return UNSUPPORTED.
+    For questions asking for recommendations, action plans, or next steps based on
     performance — fetch topic/subdomain-level weak area data so recommendations can
-    reference specific topics rather than broad skills.
+    reference specific topics (e.g. Array, Essay Writing) rather than broad skills.
     Never return UNSUPPORTED for action/recommendation questions — always fetch
     the most granular performance data available to generate specific advice.
 12. Never expose passwords, tokens, or internal system columns.
-13. For "latest" or "most recent" event queries, use ORDER BY date DESC LIMIT 1
-    to find the most recent event regardless of participation status — never skip
-    events because they have 0 participants.
-    For gest assessments, "latest" means ORDER BY created_at DESC — never filter
-    by close_time or open_time, as this excludes closed assessments.
+13. CRITICAL PERFORMANCE RULE — hackathon_final_attempt_submission (~24M rows):
+    If a query uses public.hackathon_final_attempt_submission, it MUST include:
+        WHERE f.hackathon_id = (subquery)
+    A query without this condition is INVALID and must be rewritten.
+    DO NOT:
+    - JOIN public.hackathon in the outer query to filter by title
+    - Apply h.title ILIKE in the outer WHERE clause
+    - Use a CTE or JOIN to pass hackathon_id
+    This rule applies ONLY to hackathon_final_attempt_submission.
+    JOIN-based filtering is allowed for other tables (A3, A4, A5 etc.).
+    SELF-CHECK: before returning SQL, verify — if hackathon_final_attempt_submission
+    is used, ensure f.hackathon_id = (subquery) is present. If not, rewrite.
 
 CRITICAL — STANDARD PATTERNS:
 The schema context contains STANDARD QUERY PATTERNS. These are fast-lane templates,
@@ -64,6 +76,11 @@ not a whitelist. Use them as follows:
   arrays, CTEs, window functions, JSONB operators, etc.).
 DO NOT invent a different SQL structure when a matching pattern exists.
 DO NOT return UNSUPPORTED just because no pattern matches — write the SQL yourself.
+CRITICAL — PATTERN OVERRIDE: When a documented pattern explicitly states which table
+to use or explicitly prohibits a specific table, that instruction takes absolute
+priority over your own table selection. Do NOT substitute a different table even if
+it sounds more semantically correct. Trust the documented pattern — it has been
+validated against the actual database.
 """
 
 _SQL_USER_TEMPLATE = """Schema:
@@ -84,6 +101,71 @@ _FORBIDDEN = re.compile(
 )
 
 
+def _extract_select_blocks(sql: str) -> list[str]:
+    """
+    Split a SQL string into independent SELECT blocks for per-block JOIN validation.
+
+    For a plain SELECT (no CTEs): returns [whole_sql].
+    For a WITH query: returns [cte1_body, cte2_body, ..., main_select].
+
+    Uses a paren-depth character walker — not regex — so nested subqueries
+    inside CTEs are captured whole and don't create spurious extra blocks.
+    """
+    stripped = sql.strip()
+    upper = stripped.upper().lstrip()
+
+    # Plain SELECT — no CTE splitting needed
+    if not upper.startswith("WITH"):
+        return [stripped]
+
+    blocks: list[str] = []
+    i = 0
+    n = len(stripped)
+
+    # Walk over "WITH name AS (...), name AS (...), ..." collecting CTE bodies
+    # State: we are between CTEs when depth == 0
+    depth = 0
+    cte_body_start = -1  # char index of the opening '(' of a CTE body
+
+    while i < n:
+        ch = stripped[i]
+
+        if ch == '(':
+            if depth == 0:
+                # Opening paren of a CTE body — record start (content after '(')
+                cte_body_start = i + 1
+            depth += 1
+
+        elif ch == ')':
+            depth -= 1
+            if depth == 0 and cte_body_start != -1:
+                # Closing paren of a CTE body — extract content
+                blocks.append(stripped[cte_body_start:i])
+                cte_body_start = -1
+
+                # Check if more CTEs follow (next non-whitespace char is ',')
+                j = i + 1
+                while j < n and stripped[j] in (' ', '\t', '\n', '\r'):
+                    j += 1
+                if j < n and stripped[j] == ',':
+                    # Another CTE — skip past the comma; outer loop continues
+                    i = j  # will be incremented below
+                else:
+                    # No more CTEs — everything after this is the main SELECT
+                    main_select = stripped[i + 1:].strip()
+                    if main_select:
+                        blocks.append(main_select)
+                    break  # done
+
+        i += 1
+
+    # Fallback: if WITH parse found nothing (malformed SQL), return whole string
+    if not blocks:
+        return [stripped]
+
+    return blocks
+
+
 def _validate_sql(sql: str) -> tuple[bool, str]:
     """Returns (is_valid, validated_sql_or_error)."""
     sql = sql.strip()
@@ -98,23 +180,31 @@ def _validate_sql(sql: str) -> tuple[bool, str]:
     if _FORBIDDEN.search(sql):
         return False, "Query contains forbidden keywords."
 
-    # ── JOIN sanity checks ────────────────────────────────────────────────────
-    sql_upper = sql.upper()
-    join_count  = len(re.findall(r'\bJOIN\b',  sql_upper))
-    on_count    = len(re.findall(r'\bON\b',    sql_upper))
-    using_count = len(re.findall(r'\bUSING\b', sql_upper))
+    # ── JOIN sanity checks (per-block — CTE bodies validated independently) ───
+    # Each CTE body and the final main SELECT are checked separately so a
+    # legitimate 3-CTE query with 3 JOINs per CTE is not rejected for having
+    # 9 JOINs "total". The 6-JOIN limit applies within each independent block.
+    for block in _extract_select_blocks(sql):
+        block_upper = block.upper()
+        block_join_count  = len(re.findall(r'\bJOIN\b',  block_upper))
+        block_on_count    = len(re.findall(r'\bON\b',    block_upper))
+        block_using_count = len(re.findall(r'\bUSING\b', block_upper))
 
-    if join_count > 6:
-        return False, f"Query rejected: too many JOINs ({join_count}). Maximum allowed is 6."
+        if block_join_count > 6:
+            return False, (
+                f"Query rejected: too many JOINs ({block_join_count}) in a single query block. "
+                "Maximum allowed is 6 per block."
+            )
 
-    # Cartesian product guard — each JOIN should have a matching ON/USING clause.
-    # Allow a tolerance of 1 (e.g. CROSS JOIN intentionally has no ON).
-    on_using_count = on_count + using_count
-    if join_count > 0 and (join_count - on_using_count) > 1:
-        return False, (
-            f"Query rejected: {join_count} JOIN(s) but only {on_using_count} ON/USING clause(s). "
-            "Possible cartesian product — ensure every JOIN has an ON or USING condition."
-        )
+        # Cartesian product guard — each JOIN should have a matching ON/USING clause.
+        # Allow a tolerance of 1 (e.g. CROSS JOIN intentionally has no ON).
+        block_on_using = block_on_count + block_using_count
+        if block_join_count > 0 and (block_join_count - block_on_using) > 1:
+            return False, (
+                f"Query rejected: {block_join_count} JOIN(s) but only {block_on_using} "
+                "ON/USING clause(s) in a query block. "
+                "Possible cartesian product — ensure every JOIN has an ON or USING condition."
+            )
 
     # ── Large table scan guard ────────────────────────────────────────────────
     # hackathon_final_attempt_submission has ~24M rows.
@@ -122,18 +212,21 @@ def _validate_sql(sql: str) -> tuple[bool, str]:
     # Detect this and return a scoping error so the formatter can ask faculty to narrow down.
     sql_normalized = sql.upper().replace(" ", "").replace("\n", "")
     if "HACKATHON_FINAL_ATTEMPT_SUBMISSION" in sql_normalized:
-        has_hackathon_id_filter = "HACKATHON_ID" in sql_normalized
+        # Keyword presence check — robust to aliasing and formatting differences
+        has_hackathon_id_subquery = "HACKATHON_ID" in sql_normalized and "(SELECT" in sql_normalized
+        has_participation_filter = "USER_HACKATHON_PARTICIPATION" in sql_normalized
+        has_having = "HAVING" in sql_normalized
+        has_proper_subquery = has_hackathon_id_subquery and has_participation_filter and has_having
         has_test_type_id_filter = "TEST_TYPE_ID" in sql_normalized
-        if not has_hackathon_id_filter and not has_test_type_id_filter:
+        if not has_proper_subquery and not has_test_type_id_filter:
             logger.warning(
                 f"[validate_sql] Rejected — hackathon_final_attempt_submission queried "
-                f"without hackathon_id or test_type_id filter | sql_preview={sql[:120]}"
+                f"without proper hackathon_id subquery | sql_preview={sql[:120]}"
             )
             return False, (
-                "SCOPE_REQUIRED: topic and skill breakdown queries require a specific assessment "
-                "or test type to run efficiently. Please ask the faculty to narrow down — "
-                "e.g. 'which topics are students failing in the latest MET?' or "
-                "'skill breakdown for the latest hackathon?'"
+                "INVALID_QUERY_PATTERN: Queries on hackathon_final_attempt_submission "
+                "must use hackathon_id subquery with participation filter. "
+                "Do not use JOIN-based title filtering on this table."
             )
 
     # Inject LIMIT if missing
@@ -206,6 +299,19 @@ def _generate_and_run(question: str, schema_context: str) -> dict[str, Any]:
         logger.info(f"[sql_exec] {len(data)} rows returned")
         return {"data": data, "sql": validated_sql, "error": None}
     except Exception as first_err:
+        # ── College disambiguation short-circuit ─────────────────────────────
+        # If the college name subquery matched multiple colleges, PostgreSQL raises
+        # "more than one row returned by a subquery used as an expression".
+        # We must catch this BEFORE the self-heal retry — otherwise the LLM will
+        # silently fix it by adding LIMIT 1, picking the wrong college.
+        if "more than one row returned by a subquery" in str(first_err).lower():
+            logger.warning(
+                f"[sql_exec] Ambiguous college name — subquery returned multiple rows. "
+                f"Returning AMBIGUOUS_COLLEGE error | sql_preview={validated_sql[:120]}"
+            )
+            db.rollback()
+            return {"data": [], "sql": validated_sql, "error": "AMBIGUOUS_COLLEGE"}
+
         logger.warning(f"[sql_exec] DB error — attempting self-heal: {first_err}")
         db.rollback()  # clear aborted transaction so the retry can execute cleanly
         # Self-healing retry: ask LLM to fix the syntax error only

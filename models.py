@@ -12,6 +12,7 @@ class ChatRequest(BaseModel):
     message:      str              = Field(..., description="Faculty's natural language question")
     college_name: Optional[str]    = Field(None, description="Faculty's college — scopes queries")
     thread_id:    Optional[str]    = Field(None, description="Unique conversation ID from frontend")
+    username:     Optional[str]    = Field(None, description="Admin username for college scoping")
     history:      list[dict]       = []
     last_sql:        Optional[str] = None   # ← SQL from previous turn
     sql_chain_count: int           = 0      # ← how many times SQL has been modified in a row

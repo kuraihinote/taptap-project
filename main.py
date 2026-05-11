@@ -1,5 +1,4 @@
 # main.py — TapTap Analytics Chatbot
-
 import csv
 import decimal
 import io
@@ -19,6 +18,89 @@ from models import ChatRequest, ChatResponse
 from llm import build_supervisor_graph
 from constants import DUMMY_FACULTY_ID
 from logger import logger
+
+
+def _parse_college_ids(college_id: Any, college_id_multiple: Any) -> list[int]:
+    """
+    Combine report.admins.college_id (single int) and college_id_multiple
+    (PostgreSQL INTEGER[] — comes back from SQLAlchemy as a Python list) into
+    one deduplicated list of integer college IDs.
+    Returns empty list when the admin has no college associations.
+    """
+    import json as _json
+    ids: list[int] = []
+
+    if college_id is not None:
+        try:
+            ids.append(int(college_id))
+        except (ValueError, TypeError):
+            pass
+
+    if college_id_multiple is not None:
+        if isinstance(college_id_multiple, list):
+            for v in college_id_multiple:
+                try:
+                    ids.append(int(v))
+                except (ValueError, TypeError):
+                    pass
+        elif isinstance(college_id_multiple, str):
+            s = college_id_multiple.strip()
+            if s.startswith("["):
+                try:
+                    for v in _json.loads(s):
+                        try:
+                            ids.append(int(v))
+                        except (ValueError, TypeError):
+                            pass
+                except _json.JSONDecodeError:
+                    pass
+            elif s.startswith("{"):
+                for part in s.strip("{}").split(","):
+                    part = part.strip().strip('"').strip("'")
+                    if part:
+                        try:
+                            ids.append(int(part))
+                        except (ValueError, TypeError):
+                            pass
+
+    seen: set[int] = set()
+    result: list[int] = []
+    for i in ids:
+        if i not in seen:
+            seen.add(i)
+            result.append(i)
+    return result
+
+
+def _get_admin_college_ids(username: str | None) -> list[int]:
+    """
+    Looks up report.admins for the given username and returns the combined
+    list of college IDs the admin is authorised to query.
+    Returns empty list if username is None, not found, or DB lookup fails.
+    """
+    if not username:
+        logger.info("[admin_lookup] No username provided — no college scoping")
+        return []
+    try:
+        with engine.connect() as conn:
+            row = conn.execute(
+                text(
+                    "SELECT college_id, college_id_multiple "
+                    "FROM report.admins "
+                    "WHERE username = :username "
+                    "LIMIT 1"
+                ),
+                {"username": username},
+            ).fetchone()
+        if row is None:
+            logger.warning(f"[admin_lookup] username='{username}' not found in report.admins — no college scoping")
+            return []
+        ids = _parse_college_ids(row[0], row[1])
+        logger.info(f"[admin_lookup] username='{username}' → college_ids={ids}")
+        return ids
+    except Exception as e:
+        logger.error(f"[admin_lookup] DB lookup failed for username='{username}': {e} — no college scoping")
+        return []
 
 
 def _safe_convert(obj: Any) -> Any:
@@ -145,7 +227,7 @@ async def export_csv(thread_id: str = DUMMY_FACULTY_ID):
 
 @app.post("/chat", response_model=ChatResponse)
 async def chat(request: ChatRequest):
-    logger.info(f"/chat message='{request.message[:80]}' college='{request.college_name}'")
+    logger.info(f"/chat message='{request.message[:80]}' college='{request.college_name}' username='{request.username}'")
 
     # ── Thread ID ─────────────────────────────────────────────────────────────
     # LangGraph uses this as the key to load/save conversation history.
@@ -158,12 +240,11 @@ async def chat(request: ChatRequest):
     if request.college_name:
         current_message += f" (filter to college: {request.college_name})"
 
-    logger.info(f"/chat thread_id='{faculty_id}'")
+    # ── Resolve admin college scope ───────────────────────────────────────────
+    college_ids = _get_admin_college_ids(request.username)
+    logger.info(f"/chat thread_id='{faculty_id}' | college_ids={college_ids}")
 
     # ── Invoke graph ──────────────────────────────────────────────────────────
-    # We no longer pass history from Streamlit — LangGraph loads the full
-    # conversation history from the checkpointer using thread_id automatically.
-    # Only the new HumanMessage needs to be passed each turn.
     try:
         result = await app.state.graph.ainvoke(
             {
@@ -171,6 +252,7 @@ async def chat(request: ChatRequest):
                 "user_query":    current_message,
                 # Initialise turn-specific state fields each turn
                 "direct_answer": None,
+                "college_ids":   college_ids,
             },
             config=config,
         )

@@ -25,6 +25,9 @@ from analytics import _generate_and_run
 from schema_emp      import EMP_SCHEMA_CONTEXT
 from schema_pod      import POD_SCHEMA_CONTEXT
 from schema_assess   import ASSESS_SCHEMA_CONTEXT
+from schema_course      import COURSE_SCHEMA_CONTEXT
+from schema_trainings   import TRAININGS_SCHEMA_CONTEXT
+from schema_internships import INTERNSHIP_SCHEMA_CONTEXT
 from constants import CHECKPOINT_DB_URL
 from logger import logger
 
@@ -39,7 +42,7 @@ class TapTapState(TypedDict):
     # Conversation history
     messages:         Annotated[Sequence[BaseMessage], add_messages]
     # Supervisor decision
-    domain:           Optional[Literal["pod", "assess", "emp", "direct", "advice"]]
+    domain:           Optional[Literal["pod", "assess", "emp", "course", "trainings", "internship", "direct", "advice"]]
     direct_answer:    Optional[str]
     # SQL node output
     sql_query:        Optional[str]
@@ -47,6 +50,8 @@ class TapTapState(TypedDict):
     sql_error:        Optional[str]
     # Summary of previous turn's question + 4 sample rows — passed to sql_node as context
     sql_data_summary: Optional[str]
+    # Full SQL result rows passed to advice_node (not truncated, unlike sql_data_summary)
+    advice_data:      Optional[list]
     # Final formatted answer
     final_answer:     Optional[str]
 
@@ -56,9 +61,12 @@ class TapTapState(TypedDict):
 # ══════════════════════════════════════════════════════════════════════════════
 
 DOMAIN_SCHEMAS: dict[str, str] = {
-    "emp":       EMP_SCHEMA_CONTEXT,
-    "pod":       POD_SCHEMA_CONTEXT,
-    "assess":    ASSESS_SCHEMA_CONTEXT,
+    "emp":        EMP_SCHEMA_CONTEXT,
+    "pod":        POD_SCHEMA_CONTEXT,
+    "assess":     ASSESS_SCHEMA_CONTEXT,
+    "course":     COURSE_SCHEMA_CONTEXT,
+    "trainings":  TRAININGS_SCHEMA_CONTEXT,
+    "internship": INTERNSHIP_SCHEMA_CONTEXT,
 }
 
 
@@ -88,6 +96,83 @@ profiling tests, FDP program tests, BB Screening, Daily Tests. Use for: top scor
 named test/event, shortlisted students, who submitted vs who didn't, pass rates, skill
 breakdowns, subdomain accuracy, round-wise scores, monthly MET bands, completion rates.
 
+course — All self-paced and instructor-led courses (also called modules or programs in faculty
+speech). Use for: course catalog, enrollment counts, attendance records, chapters and activities
+structure, which colleges have access to which courses, and scores for assessments located
+specifically inside a course. Route here when faculty asks "what courses/programs/modules are
+available", "show me the catalog", "which programs can students access", or any question about
+course structure, enrollment, or attendance.
+
+trainings — Structured training programs (Placement Program, Python Trainings, C&DS) delivered
+by Blackbucks to college batches. Use for: listing training programs, phases within a training,
+student batches and rosters, assessment scores within a training phase (phase_assessment ->
+user_hackathon_participation), top scorers, live session counts per phase, training overview
+by college. Also covers: student feedback scores (satisfaction ratings), interactiveness
+percentages for live sessions, and phase-level engagement metrics within a training program.
+
+internship — Structured internship programs (Short Term / Long Term) delivered by Blackbucks
+to college students. Use for: listing internship programs, domains within an internship,
+student batches and rosters, assessment scores within an internship domain (internship_assessment
+-> user_hackathon_participation), top scorers, live session counts, student registration counts
+by college, certificate statistics, student feedback scores (satisfaction ratings) for internship
+sessions, and interactiveness percentages for internship live sessions.
+
+DISAMBIGUATION — trainings vs assess:
+- 'trainings' → assessments or results within a named training program or batch
+  context: "for X training", "in X program", "X batch results", "results for [name]
+  training", "performance in [name] program". Route here whenever the query places
+  an assessment or result inside a training or batch context.
+  TIEBREAKER: batch/cohort context is a STRONGER signal than exam/assessment/test
+  vocabulary. If the question mentions a batch, cohort, or group of students AND
+  also mentions an exam, test, or assessment — route to 'trainings', not 'assess'.
+  Example: "how did my batch group perform in the last exam" → trainings
+  Example: "scores for students in [batch] on the test" → trainings
+  Example: "assessment results for [batch name]" → trainings
+- 'assess' → standalone assessments, hackathons, MET, profiling tests, gest
+  assessments with NO batch or training program context: the query refers to a
+  test or event directly, with no mention of a batch, cohort, or training program.
+  Example: "top scorers in the latest hackathon" → assess
+  Example: "who passed the MET this month" → assess
+  Example: "shortlisted students for the BB Screening" → assess
+
+DISAMBIGUATION — course attendance vs trainings:
+- Route to 'course' when the question is about daily class attendance for a self-paced
+  or instructor-led course (course.attendance table — present/absent per day per student).
+- Route to 'trainings' when the question is about attendance or present/absent counts
+  for a live session event within a training phase or batch context.
+  TIEBREAKER: if "attendance" appears WITH words like "class", "present", "absent",
+  "daily attendance" AND the question has no reference to a training program, batch,
+  or phase → route to 'course'.
+  If the question mentions attendance in the context of a training session, phase,
+  or batch → route to 'trainings'.
+  The word "session" alone does NOT route to course — only route to course when
+  a self-paced course name is clearly present.
+  Example: "attendance for [course] at [college]" → course
+  Example: "who was absent in [course] this week" → course
+  Example: "attendance percentage for ECE batch in [course]" → course
+  Example: "mark attendance for today's class" → course
+  Example: "attendance for each session in [training] phase" → trainings
+  Example: "present/absent per session in [batch]" → trainings
+
+DISAMBIGUATION — trainings feedback vs internship feedback:
+- Route to 'trainings' when feedback, satisfaction, or interactiveness is asked in the
+  context of a training program, placement program, C&DS, Python Training, or training phase/batch.
+  Example: "feedback for Python Training phase 2" → trainings
+  Example: "interactiveness for placement batch" → trainings
+  Example: "satisfaction scores in C&DS program" → trainings
+- Route to 'internship' when feedback, satisfaction, or interactiveness is asked in the
+  context of an internship program or internship domain.
+  Example: "feedback for FSD internship" → internship
+  Example: "average interactiveness for AIML internship sessions" → internship
+  Example: "satisfaction score for [internship name]" → internship
+  TIEBREAKER: if the word "internship" appears anywhere in the question → always route to 'internship'.
+- "daily test scores", "grand test scores", "employability test scores", "assessment scores",
+  "student activity", "test performance" + internship/domain context → always route to
+  'internship', never trainings.
+  Example: "daily test scores in FSD domain" → internship
+  Example: "grand test results for AIML internship" → internship
+  Example: "employability test scores for [internship]" → internship
+
 Your only job: read the question AND the conversation history, then return which
 module it belongs to. Use the conversation history to understand follow-up questions
 that may lack explicit context on their own. If the latest question is a short follow-up
@@ -111,6 +196,9 @@ Return ONLY valid JSON — no markdown, no explanation:
   {"domain": "emp"}
   {"domain": "pod"}
   {"domain": "assess"}
+  {"domain": "course"}
+  {"domain": "trainings"}
+  {"domain": "internship"}
   {"domain": "advice"}
 
 Route to "advice" if the faculty is asking what to do, how to help, how to improve,
@@ -126,6 +214,9 @@ Return ONLY valid JSON — no markdown, no explanation:
   {"domain": "emp"}
   {"domain": "pod"}
   {"domain": "assess"}
+  {"domain": "course"}
+  {"domain": "trainings"}
+  {"domain": "internship"}
   {"domain": "direct", "direct_answer": "<your answer here>"}
 
 Route to "direct" ONLY when the question is clearly outside student analytics:
@@ -163,6 +254,9 @@ def supervisor_node(state: TapTapState) -> dict:
         f"emp: {EMP_SCHEMA_CONTEXT[:600]}\n\n"
         f"pod: {POD_SCHEMA_CONTEXT[:600]}\n\n"
         f"assess: {ASSESS_SCHEMA_CONTEXT[:600]}\n\n"
+        f"course: {COURSE_SCHEMA_CONTEXT[:600]}\n\n"
+        f"trainings: {TRAININGS_SCHEMA_CONTEXT[:600]}\n\n"
+            f"internship: {INTERNSHIP_SCHEMA_CONTEXT[:600]}\n\n"
     )
 
     prev_domain = state.get("domain")
@@ -277,7 +371,7 @@ RULES:
 - If the database result has zero rows, say: "No data found. The event or assessment may exist but have no participants yet, or the filters may not match any records. Try refining your search."
 - CRITICAL: If the database result has more than 0 rows, you MUST present the data regardless of what the values look like. Never say "No data found" when rows are present. Zero scores, null values, empty strings — all must be presented as-is.
 - Never mention SQL, databases, tables, or technical details.
-- Never say "course" — say "difficulty level".
+- Never say "course level" — say "difficulty level".
 - Round all numbers to 2 decimal places.
 - Never list more than 10 items — summarise the rest as "...and N more".
 - GROUPING — only group rows when a column in the data explicitly supports it:
@@ -312,6 +406,7 @@ def formatter_node(state: TapTapState) -> dict:
         return {
             "final_answer":     answer,
             "sql_data_summary": "",
+            "advice_data":      [],
             "messages":         [AIMessage(content=answer)],
         }
 
@@ -327,6 +422,23 @@ def formatter_node(state: TapTapState) -> dict:
         return {
             "final_answer":     answer,
             "sql_data_summary": "",
+            "advice_data":      [],
+            "messages":         [AIMessage(content=answer)],
+        }
+
+    if sql_error == "AMBIGUOUS_COLLEGE":
+        answer = (
+            "Multiple colleges match that name — I need a more specific college name to give you the right answer.\n\n"
+            "Try using a longer or more unique part of the college name. "
+            "If you're not sure of the exact name, ask me:\n"
+            "\"Show me all colleges matching '[your keyword]'\"\n"
+            "and I'll list them so you can pick the right one."
+        )
+        logger.info(f"[formatter] AMBIGUOUS_COLLEGE — returning disambiguation prompt | domain='{domain}'")
+        return {
+            "final_answer":     answer,
+            "sql_data_summary": "",
+            "advice_data":      [],
             "messages":         [AIMessage(content=answer)],
         }
 
@@ -369,6 +481,7 @@ def formatter_node(state: TapTapState) -> dict:
     return {
         "final_answer":     answer,
         "sql_data_summary": sql_data_summary,
+        "advice_data":      data,
         "messages":         [AIMessage(content=answer)],
     }
 
@@ -384,26 +497,33 @@ The faculty has just seen data about their students and is asking for advice or 
 Use the provided data context to give specific, practical advice tailored to what the data shows.
 
 RULES:
-- Give 4–6 concise bullet points of actionable advice
-- Base every point on the data provided — do not invent situations
-- Speak directly to the faculty: "Consider...", "You may want to...", "Students who..."
+- First, scan ALL rows for topics/subdomains where area_category = 'Needs Improvement' or pass rate is below 50%. List them mentally before writing any bullets.
+- Each bullet about a weak area MUST follow this format:
+  "[Topic name] — [X]% pass rate → [one specific action for faculty]"
+  Never write a bullet that does not name a specific topic from the data.
+- When student counts are present (not attempted, absent, low scorers), state the exact count and recommend immediate follow-up.
+- Speak directly to the faculty: "Consider...", "You may want to..."
 - Never mention SQL, databases, tables, or technical details
-- Never say "course" — say "difficulty level"
+- Never say "course level" — say "difficulty level"
 - Be encouraging and constructive
+- Give 4–6 concise bullet points total
 """
 
 def advice_node(state: TapTapState) -> dict:
     """
-    Uses sql_data_summary from the previous turn to give faculty actionable advice.
+    Uses advice_data (full SQL result) + sql_data_summary (question context)
+    to give faculty specific, topic-named actionable advice.
     """
     question         = state["user_query"]
     sql_data_summary = state.get("sql_data_summary") or ""
+    advice_data      = state.get("advice_data") or []
 
-    logger.info(f"[advice] Received question: '{question[:120]}' | sql_data_summary_len={len(sql_data_summary)}")
+    logger.info(f"[advice] Received question: '{question[:120]}' | advice_data_rows={len(advice_data)} | sql_data_summary_len={len(sql_data_summary)}")
 
     user_text = (
         f"Faculty question: {question}\n\n"
-        f"Data context:\n{sql_data_summary}"
+        f"Previous question context: {sql_data_summary}\n\n"
+        f"Full data ({len(advice_data)} rows):\n{json.dumps(advice_data, indent=2)}"
     )
 
     try:
@@ -413,7 +533,7 @@ def advice_node(state: TapTapState) -> dict:
         ])
         answer = response.content.strip()
     except Exception as e:
-        logger.error(f"[advice] LLM error — question='{question[:120]}' | sql_data_summary_len={len(sql_data_summary)} | error={e}")
+        logger.error(f"[advice] LLM error — question='{question[:120]}' | advice_data_rows={len(advice_data)} | error={e}")
         answer = "I couldn't generate advice at this time. Please try again."
 
     logger.info(f"[advice] Final answer (first 200 chars): {answer[:200]}")
